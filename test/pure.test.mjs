@@ -13,6 +13,7 @@ import * as edges from '../src/edges.js';
 import * as storage from '../src/storage.js';
 import * as world from '../src/world.js';
 import * as route from '../src/route.js';
+import * as rooms from '../src/rooms.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
@@ -33,7 +34,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world, route });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world, route, rooms });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -602,6 +603,66 @@ mem.set(VIEW_KEY, 'not json at all');
 ok('unparseable view data is rejected', T.loadMapView() === null);
 mem.delete(VIEW_KEY);
 ok('no stored view yields null', T.loadMapView() === null);
+
+/* ================= named rooms and bookmarks ================= */
+
+T.setState(T.createDocument());
+const nt = T.createTemplate('Corridor');
+T.state.templates.push(nt);
+const nkey = T.placementKey(4, 4);
+T.state.map.placements[nkey] = { templateId: nt.id, rot: 0, mir: false };
+
+ok('an unnamed room shows its template name', T.roomName(nkey) === 'Corridor');
+ok('and reports that the name is not its own', !T.hasOwnName(nkey));
+
+T.setRoomLabel(nkey, '  Reception  ');
+ok('a room name is trimmed and kept',
+   T.roomName(nkey) === 'Reception' && T.hasOwnName(nkey));
+T.undo();
+ok('naming a room is one undo step',
+   T.roomName(nkey) === 'Corridor' && !T.hasOwnName(nkey));
+T.redo();
+ok('and redoes', T.roomName(nkey) === 'Reception');
+
+T.setRoomLabel(nkey, '   ');
+ok('a blank name falls back to the template',
+   T.roomName(nkey) === 'Corridor' && !T.hasOwnName(nkey));
+T.setRoomLabel(nkey, 'Reception');
+
+ok('a room starts unbookmarked', !T.isBookmarked(nkey));
+T.toggleBookmark(nkey);
+ok('bookmarking records it', T.isBookmarked(nkey) && T.bookmarkList().length === 1);
+ok('the bookmark shows the room name', T.bookmarkList()[0].name === 'Reception');
+
+/* the whole point of storing a key rather than a copy */
+T.setRoomLabel(nkey, 'Lobby');
+ok('renaming the room renames its bookmark', T.bookmarkList()[0].name === 'Lobby');
+
+T.toggleBookmark(nkey);
+ok('bookmarking again removes it',
+   !T.isBookmarked(nkey) && T.bookmarkList().length === 0);
+T.undo();
+ok('removing a bookmark is one undo step', T.isBookmarked(nkey));
+
+const savedRoom = T.state.map.placements[nkey];
+delete T.state.map.placements[nkey];
+ok('a bookmark whose room is gone is not listed', T.bookmarkList().length === 0);
+T.state.map.placements[nkey] = savedRoom;
+ok('and it comes back when the room does', T.bookmarkList().length === 1);
+
+/* ---- both survive the document format ---- */
+const nameDoc = T.deserialize(JSON.parse(JSON.stringify(T.serialize(T.state))));
+ok('room names survive a round-trip', nameDoc.map.placements[nkey].label === 'Lobby');
+ok('bookmarks survive a round-trip', nameDoc.map.bookmarks.join() === nkey);
+
+const rawDoc = JSON.parse(JSON.stringify(T.serialize(T.state)));
+rawDoc.map.bookmarks.push('99,99');
+ok('a bookmark pointing at no room is dropped on load',
+   T.deserialize(rawDoc).map.bookmarks.join() === nkey);
+
+rawDoc.map.placements[nkey].label = '   ';
+ok('a blank stored name is not kept',
+   T.deserialize(rawDoc).map.placements[nkey].label === undefined);
 
 /* ---- colour maths ---- */
 ok('mid grey inverts to a contrasting colour', T.invertColor('#808080') === '#ffffff');

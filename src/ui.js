@@ -14,7 +14,8 @@ import { editor, wrapEl, resizeCanvas, fitView, centerView, drawEditor, setTool,
          renderEditorHeader, updateEditorFoot, endDrag } from './editor.js';
 import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapTemplateList, updateMapBar, updateMapFoot,
-         rotateAction, mirrorAction, deleteSelection, setMapMode,
+         rotateAction, mirrorAction, deleteSelection, setMapMode, setMapPanel,
+         renderMapSidebar, nameSelectedRoom, bookmarkSelectedRoom,
          locatePosition, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
@@ -255,7 +256,7 @@ function refreshAll() {
   renderTemplateList();
   renderPalette();
   renderEditorHeader();
-  renderMapTemplateList();
+  renderMapSidebar();
   updateMapBar();
   refreshStats();
   updateEditorFoot();
@@ -306,13 +307,14 @@ document.getElementById("btn-map-route").addEventListener("click", function () {
 document.getElementById("btn-map-rotate").addEventListener("click", rotateAction);
 document.getElementById("btn-map-mirror").addEventListener("click", mirrorAction);
 document.getElementById("btn-map-delete").addEventListener("click", deleteSelection);
-document.getElementById("btn-map-clear-brush").addEventListener("click", function () {
-  mapUI.brush = null;
-  mapUI.selected = null;
-  renderMapTemplateList();
-  updateMapBar();
-  drawMap();
+document.getElementById("btn-map-add-room").addEventListener("click", function () {
+  setMapPanel("templates");
 });
+document.getElementById("btn-map-cancel-add").addEventListener("click", function () {
+  setMapPanel("bookmarks");
+});
+document.getElementById("btn-map-name").addEventListener("click", nameSelectedRoom);
+document.getElementById("btn-map-bookmark").addEventListener("click", bookmarkSelectedRoom);
 document.getElementById("btn-map-fit").addEventListener("click", function () {
   fitMapView();
   updateMapFoot();
@@ -393,6 +395,8 @@ window.addEventListener("keydown", function (ev) {
       setMapMode(mapUI.mode === "route" ? "place" : "route");
       return;
     }
+    if (key === "n") { ev.preventDefault(); nameSelectedRoom(); return; }
+    if (key === "b") { ev.preventDefault(); bookmarkSelectedRoom(); return; }
     if (key === "r") { ev.preventDefault(); rotateAction(); return; }
     if (key === "m") { ev.preventDefault(); mirrorAction(); return; }
     if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -401,11 +405,12 @@ window.addEventListener("keydown", function (ev) {
       return;
     }
     if (ev.key === "Escape") {
+      if (mapUI.panel === "templates") { setMapPanel("bookmarks"); return; }
       if (mapUI.mode !== "place") { setMapMode("place"); return; }
       if (mapUI.marker) { mapUI.marker = null; drawMap(); return; }
       mapUI.selected = null;
       mapUI.brush = null;
-      renderMapTemplateList();
+      renderMapSidebar();
       updateMapBar();
       drawMap();
       return;

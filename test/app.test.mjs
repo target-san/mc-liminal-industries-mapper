@@ -272,6 +272,51 @@ T.setMapMode('place');
 ok('leaving route mode clears both ends',
    T.mapUI.route === null && T.mapUI.routeFrom === null);
 
+/* ================= bookmarks panel and room names ================= */
+ok('the sidebar starts on bookmarks', T.mapUI.panel === 'bookmarks');
+T.setMapPanel('templates');
+ok('Add room switches to the template palette', T.mapUI.panel === 'templates');
+
+T.mapUI.brush = brushId;
+T.placeRoom(12, 10);
+ok('placing a room returns the sidebar to bookmarks', T.mapUI.panel === 'bookmarks');
+
+T.mapUI.selected = '10,10';
+T.bookmarkSelectedRoom();
+ok('the selected room can be bookmarked', T.isBookmarked('10,10'));
+
+T.mapUI.selected = null;
+T.goToRoom('10,10');
+ok('going to a bookmark selects that room', T.mapUI.selected === '10,10');
+ok('and centres the view on it',
+   Math.abs(T.mapUI.view.ox +
+            (10 * T.GRID_PITCH + T.CENTER_TILE + 0.5) * T.mapUI.view.scale - 450) < 1e-6);
+
+/* in route mode a bookmark picks a route end instead of a selection */
+T.setMapMode('route');
+T.goToRoom('10,10');
+ok('a bookmark sets the route start', T.mapUI.routeFrom === '10,10');
+T.goToRoom('11,10');
+ok('a second bookmark completes the route',
+   T.mapUI.route && T.mapUI.route.cells.join('|') === '10,10|11,10',
+   T.mapUI.route && T.mapUI.route.cells.join('|'));
+T.setMapMode('place');
+
+/* naming through the dialog */
+T.ui.askText = () => Promise.resolve('Reception');
+T.mapUI.selected = '10,10';
+await T.nameSelectedRoom();
+ok('naming a room from the map sticks', T.roomName('10,10') === 'Reception');
+ok('the bookmark follows the new name',
+   T.bookmarkList().some((b) => b.key === '10,10' && b.name === 'Reception'));
+
+/* deleting a room takes its bookmark with it */
+T.deleteSelection();
+ok('deleting a room drops its bookmark', !T.isBookmarked('10,10'));
+T.undo();
+ok('undo restores the room and its bookmark',
+   !!T.state.map.placements['10,10'] && T.isBookmarked('10,10'));
+
 /* ---- the map is the default tab ---- */
 ok('the map tab is the one shown on load', T.activeTab === 'map');
 

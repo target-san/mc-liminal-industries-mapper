@@ -2,7 +2,7 @@
    The map canvas: placement, orientation and the room bitmap cache.
 */
 
-import { ROOM_SIZE, GRID_PITCH, CELL_COUNT, cellIndex, toTemplate,
+import { ROOM_SIZE, GRID_PITCH, CENTER_TILE, CELL_COUNT, cellIndex, toTemplate,
          applyPlacementTransform, placementKey } from './geometry.js';
 import { parseHexColor, SLOT_PASSAGE, SLOT_WALL } from './palette.js';
 import { sharedPassages, edgeConnects, edgeOpenable, isEdgeOpen, toggleEdge,
@@ -15,6 +15,8 @@ import { dpr, setDpr, spaceHeld } from './screen.js';
 import { isAnchored, anchorOrigin, worldOfTile, tileOfWorld, setAnchor,
          roomAtTile, parseWorldXZ, formatXZ } from './world.js';
 import { findRoute, routeStillValid, routePoints, routeLength } from './route.js';
+import { roomName, hasOwnName, setRoomLabel, isBookmarked, toggleBookmark,
+         dropBookmark, bookmarkList } from './rooms.js';
 import { ui } from './hooks.js';
 
 /* ============================================================
@@ -39,6 +41,7 @@ const mapUI = {
   hoverEdge: null,    // { gx, gy, dir } while in doors mode
   mode: "place",      // "place" | "doors" | "anchor" | "route"
   marker: null,       // { u, v, x, z } from the last position lookup
+  panel: "bookmarks", // sidebar contents: "bookmarks" | "templates"
   routeFrom: null,    // first room picked in route mode
   route: null,        // { cells, edges } once both ends are picked
   drag: null,
@@ -351,6 +354,37 @@ function drawTileMarker(u, v, color, width) {
    A dark casing under a bright line, so the route reads over any room colour
    the palette happens to hold.
 */
+/*
+   Names sit on the rooms that carry one. Only explicitly named rooms are
+   labelled: stamping every room with its template name would bury the map
+   under repeated text.
+*/
+function drawRoomLabels() {
+  const s = mapUI.view.scale;
+  if (ROOM_SIZE * s < 70) return;   // nothing legible would fit
+
+  mctx.font = "600 12px system-ui, 'Segoe UI', sans-serif";
+  mctx.textAlign = "center";
+  mctx.textBaseline = "middle";
+
+  Object.keys(state.map.placements).forEach(function (key) {
+    if (!hasOwnName(key)) return;
+    const parts = key.split(",");
+    const rect = roomScreenRect(parseInt(parts[0], 10), parseInt(parts[1], 10));
+    if (rect.x > mapW || rect.y > mapH || rect.x + rect.w < 0 || rect.y + rect.h < 0) return;
+
+    const text = roomName(key);
+    const x = rect.x + rect.w / 2;
+    const y = rect.y + rect.h / 2;
+    const w = mctx.measureText(text).width + 10;
+
+    mctx.fillStyle = "rgba(16,19,23,0.78)";
+    mctx.fillRect(x - w / 2, y - 9, w, 18);
+    mctx.fillStyle = "#eaf0f8";
+    mctx.fillText(text, x, y);
+  });
+}
+
 function drawRoute() {
   if (mapUI.route && !routeStillValid(mapUI.route)) {
     mapUI.route = null;   // a room or wall along it changed
@@ -460,6 +494,7 @@ function drawMap() {
     mctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
+  drawRoomLabels();
   drawRoute();
   drawMarkers();
 
@@ -584,6 +619,7 @@ function placeRoom(gx, gy) {
     */
     mapUI.brush = null;
     mapUI.selected = key;
+    mapUI.panel = "bookmarks";
     markDirty();
   });
 }
@@ -634,6 +670,7 @@ function deleteSelection() {
     edgesTouching(parseInt(at[0], 10), parseInt(at[1], 10)).forEach(function (k) {
       state.map.openEdges.delete(k);
     });
+    dropBookmark(key);
     mapUI.selected = null;
     markDirty();
   });
@@ -663,16 +700,8 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
 
   if (mapUI.mode === "route") {
     const cell = mapCellAt(p.x, p.y);
-    const key = placementKey(cell.gx, cell.gy);
-    if (!state.map.placements[key]) return;
-    if (!mapUI.routeFrom || mapUI.route) {
-      /* First pick, or starting over after a finished route. */
-      mapUI.routeFrom = key;
-      mapUI.route = null;
-    } else {
-      mapUI.route = findRoute(mapUI.routeFrom, key);
-      if (!mapUI.route) mapUI.routeFrom = key;   // unreachable: treat as a new start
-    }
+    pickRouteRoom(placementKey(cell.gx, cell.gy));
+    renderMapSidebar();
     updateMapBar();
     updateMapFoot();
     drawMap();
@@ -770,6 +799,8 @@ mapCanvasEl.addEventListener("wheel", function (ev) {
 
 const mapTplListEl  = document.getElementById("map-tpl-list");
 const mapTplEmptyEl = document.getElementById("map-tpl-empty");
+const mapBmListEl   = document.getElementById("map-bm-list");
+const mapBmEmptyEl  = document.getElementById("map-bm-empty");
 const mapBrushEl    = document.getElementById("map-brush");
 const mapOrientEl   = document.getElementById("map-orient");
 const mapPosEl      = document.getElementById("map-pos");
@@ -808,7 +839,7 @@ function renderMapTemplateList() {
     li.addEventListener("click", function () {
       mapUI.brush = mapUI.brush === t.id ? null : t.id;
       mapUI.selected = null;
-      renderMapTemplateList();
+      renderMapSidebar();
       updateMapBar();
       drawMap();
     });
@@ -817,9 +848,128 @@ function renderMapTemplateList() {
   });
 }
 
+/*
+   One end of a route. Called from a click on the map and from the bookmark
+   list alike, so a route can be picked either way -- or one end each.
+*/
+function pickRouteRoom(key) {
+  if (!state.map.placements[key]) return;
+  if (!mapUI.routeFrom || mapUI.route) {
+    /* First pick, or starting over after a finished route. */
+    mapUI.routeFrom = key;
+    mapUI.route = null;
+  } else {
+    mapUI.route = findRoute(mapUI.routeFrom, key);
+    if (!mapUI.route) mapUI.routeFrom = key;   // unreachable: treat as a new start
+  }
+}
+
+/*
+   Centres the view on a room. In route mode the click picks a route end
+   rather than a selection, so bookmarks drive routing directly.
+*/
+function goToRoom(key) {
+  if (!state.map.placements[key]) return;
+  if (mapUI.mode === "route") pickRouteRoom(key);
+  else mapUI.selected = key;
+  const parts = key.split(",");
+  centreOnTile(parseInt(parts[0], 10) * GRID_PITCH + CENTER_TILE,
+               parseInt(parts[1], 10) * GRID_PITCH + CENTER_TILE);
+  renderMapSidebar();
+  updateMapBar();
+  updateMapFoot();
+  drawMap();
+}
+
+async function nameSelectedRoom() {
+  const key = mapUI.selected;
+  if (!key || !state.map.placements[key]) return;
+  const text = await ui.askText("Name this room",
+    hasOwnName(key) ? roomName(key) : "", "Save",
+    "Leave it empty to go back to the template name.");
+  if (text === null) return;
+  setRoomLabel(key, text);
+}
+
+function bookmarkSelectedRoom() {
+  const key = mapUI.selected;
+  if (!key || !state.map.placements[key]) return;
+  toggleBookmark(key);
+}
+
+/* The sidebar shows bookmarks; the template palette is a detour taken only
+   to place a room, and placement returns from it automatically. */
+function setMapPanel(panel) {
+  mapUI.panel = panel;
+  if (panel === "bookmarks") mapUI.brush = null;
+  renderMapSidebar();
+  updateMapBar();
+  drawMap();
+}
+
+/* What a bookmark row should look active for: the selection normally, the
+   route ends while routing. */
+function bookmarkIsCurrent(key) {
+  if (mapUI.mode === "route") {
+    if (mapUI.route) {
+      return key === mapUI.route.cells[0] ||
+             key === mapUI.route.cells[mapUI.route.cells.length - 1];
+    }
+    return key === mapUI.routeFrom;
+  }
+  return key === mapUI.selected;
+}
+
+function renderBookmarkList() {
+  mapBmListEl.textContent = "";
+  const items = bookmarkList();
+  mapBmEmptyEl.style.display = items.length ? "none" : "";
+
+  items.forEach(function (item) {
+    const li = document.createElement("li");
+    li.className = "tpl-item" + (bookmarkIsCurrent(item.key) ? " selected" : "");
+    li.title = mapUI.mode === "route"
+      ? "Use this room as a route end"
+      : "Go to this room";
+
+    const name = document.createElement("span");
+    name.className = "tpl-name";
+    name.textContent = item.name;
+    li.appendChild(name);
+
+    const at = document.createElement("span");
+    at.className = "pal-flag";
+    at.textContent = item.key;
+    li.appendChild(at);
+
+    li.addEventListener("click", function () { goToRoom(item.key); });
+    mapBmListEl.appendChild(li);
+  });
+}
+
+function renderMapSidebar() {
+  const templates = mapUI.panel === "templates";
+  document.getElementById("map-side-title").textContent =
+    templates ? "Place room" : "Bookmarks";
+  document.getElementById("map-panel-bookmarks").style.display = templates ? "none" : "";
+  document.getElementById("map-panel-templates").style.display = templates ? "" : "none";
+  document.getElementById("btn-map-add-room").style.display = templates ? "none" : "";
+  document.getElementById("btn-map-cancel-add").style.display = templates ? "" : "none";
+  renderBookmarkList();
+  renderMapTemplateList();
+}
+
 function updateMapBar() {
   const sel = selectedPlacement();
   const doors = mapUI.mode === "doors";
+  const acting = mapUI.mode === "place" && !!sel;
+
+  /* Selection actions are only meaningful on a selected room in place mode. */
+  document.getElementById("btn-map-delete").disabled = !acting;
+  document.getElementById("btn-map-name").disabled = !acting;
+  const btnBm = document.getElementById("btn-map-bookmark");
+  btnBm.disabled = !acting;
+  btnBm.textContent = acting && isBookmarked(mapUI.selected) ? "Unbookmark" : "Bookmark";
 
   const btnDoors = document.getElementById("btn-map-doors");
   if (btnDoors) btnDoors.classList.toggle("on", doors);
@@ -835,25 +985,21 @@ function updateMapBar() {
       : mapUI.routeFrom
         ? "now click where you want to get to"
         : "click the room you are starting from";
-    document.getElementById("btn-map-delete").disabled = true;
     return;
   }
 
   if (mapUI.mode === "anchor") {
     mapBrushEl.textContent = "anchor";
     mapOrientEl.textContent = "click the tile whose coordinates you know";
-    document.getElementById("btn-map-delete").disabled = true;
     return;
   }
   if (doors) {
     mapBrushEl.textContent = "doors";
     mapOrientEl.textContent = "click a wall between two rooms";
-    document.getElementById("btn-map-delete").disabled = true;
     return;
   }
   if (sel) {
-    const t = state.templates.find(function (x) { return x.id === sel.templateId; });
-    mapBrushEl.textContent = "selected: " + (t ? t.name : "?");
+    mapBrushEl.textContent = "selected: " + roomName(mapUI.selected);
     mapOrientEl.textContent = orientationText(sel.rot, sel.mir);
   } else if (mapUI.brush) {
     const t = state.templates.find(function (x) { return x.id === mapUI.brush; });
@@ -863,7 +1009,6 @@ function updateMapBar() {
     mapBrushEl.textContent = "no brush";
     mapOrientEl.textContent = "pick a room on the left to place one";
   }
-  document.getElementById("btn-map-delete").disabled = !sel;
 }
 
 function updateMapFoot() {
@@ -957,6 +1102,13 @@ export {
   mirrorAction,
   deleteSelection,
   renderMapTemplateList,
+  renderMapSidebar,
+  renderBookmarkList,
+  setMapPanel,
+  goToRoom,
+  pickRouteRoom,
+  nameSelectedRoom,
+  bookmarkSelectedRoom,
   updateMapBar,
   updateMapFoot,
   setMapMode,

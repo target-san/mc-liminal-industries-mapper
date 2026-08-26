@@ -50,8 +50,9 @@ function createDocument() {
     palette: defaultPalette(),
     templates: [],
     map: {
-      placements: {},        // "gx,gy" -> { templateId, rot, mir }
+      placements: {},        // "gx,gy" -> { templateId, rot, mir, label? }
       openEdges: new Set(),  // edgeKey strings
+      bookmarks: [],         // placement keys, in the order they were added
       anchor: null,          // { gx, gy, r, c, worldX, worldZ }
     },
   };
@@ -120,6 +121,7 @@ function serialize(doc) {
     map: {
       placements: doc.map.placements,
       openEdges: Array.from(doc.map.openEdges).sort(),
+      bookmarks: doc.map.bookmarks.slice(),
       anchor: doc.map.anchor,
     },
   };
@@ -215,11 +217,24 @@ function deserialize(raw) {
       rot: (p.rot | 0) & 3,
       mir: p.mir === true,
     };
+    if (typeof p.label === "string" && p.label.trim()) {
+      doc.map.placements[key].label = p.label.trim();
+    }
   });
 
   if (Array.isArray(rawMap.openEdges)) {
     rawMap.openEdges.forEach(function (k) {
       if (typeof k === "string") doc.map.openEdges.add(k);
+    });
+  }
+
+  /* Bookmarks pointing at rooms that are not there are dropped rather than
+     kept as dead entries. */
+  if (Array.isArray(rawMap.bookmarks)) {
+    rawMap.bookmarks.forEach(function (key) {
+      if (typeof key !== "string") return;
+      if (!doc.map.placements[key]) return;
+      if (doc.map.bookmarks.indexOf(key) === -1) doc.map.bookmarks.push(key);
     });
   }
 

@@ -96,15 +96,24 @@
   <div class="panel active" id="panel-map">
 
     <div class="side">
-      <h2>Place room</h2>
+      <h2 id="map-side-title">Bookmarks</h2>
       <div class="side-body">
-        <ul class="tpl-list" id="map-tpl-list"></ul>
-        <div class="empty-note" id="map-tpl-empty">
-          No templates yet. Create one on the Rooms tab first.
+        <div id="map-panel-bookmarks">
+          <ul class="tpl-list" id="map-bm-list"></ul>
+          <div class="empty-note" id="map-bm-empty">
+            No bookmarks yet. Select a room on the map and press Bookmark.
+          </div>
+        </div>
+        <div id="map-panel-templates" style="display:none">
+          <ul class="tpl-list" id="map-tpl-list"></ul>
+          <div class="empty-note" id="map-tpl-empty">
+            No templates yet. Create one on the Rooms tab first.
+          </div>
         </div>
       </div>
       <div class="side-foot">
-        <button id="btn-map-clear-brush">Clear brush</button>
+        <button id="btn-map-add-room">Add room</button>
+        <button id="btn-map-cancel-add" style="display:none">Cancel</button>
       </div>
     </div>
 
@@ -118,6 +127,8 @@
         <button id="btn-map-locate" title="Find a world position on the map (L)">Locate</button>
         <button id="btn-map-route" title="Walking route between two rooms (F)">Route</button>
         <span class="sep"></span>
+        <button id="btn-map-name" title="Name the selected room (N)">Name</button>
+        <button id="btn-map-bookmark" title="Bookmark the selected room (B)">Bookmark</button>
         <button id="btn-map-rotate" title="Rotate 90 degrees clockwise (R)">Rotate</button>
         <button id="btn-map-mirror" title="Mirror horizontally (M)">Mirror</button>
         <button id="btn-map-delete" title="Delete the selected room (Del)">Delete</button>
