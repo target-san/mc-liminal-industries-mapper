@@ -152,7 +152,7 @@ button.on {
 .tpl-item:hover { background: #232833; }
 .tpl-item.selected { background: #2c3240; }
 .tpl-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tpl-del {
+.tpl-btn {
   flex: 0 0 auto;
   padding: 0 5px;
   line-height: 18px;
@@ -160,7 +160,9 @@ button.on {
   border-color: transparent;
   color: #6d7684;
 }
-.tpl-del:hover { background: #4a2b2b; border-color: #6b3a3a; color: #e2b4b4; }
+.tpl-btn:hover { background: #2c3240; border-color: #3a4150; color: #d5d9e0; }
+/* Only deletion gets the warning colour; duplicate and rename are harmless. */
+.tpl-btn.del:hover { background: #4a2b2b; border-color: #6b3a3a; color: #e2b4b4; }
 
 .empty-note { padding: 10px 6px; color: #6d7684; font-size: 12px; }
 
@@ -325,3 +327,45 @@ button.on {
 }
 .card dt { color: #6d7684; }
 .card dd { margin: 0; color: #d5d9e0; font-variant-numeric: tabular-nums; }
+
+/* ---------- Modal dialogs ---------- */
+.modal {
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  background: #1b1f26;
+  color: #d5d9e0;
+  padding: 0;
+  min-width: 300px;
+  max-width: 420px;
+  font: inherit;
+}
+.modal::backdrop { background: rgba(0, 0, 0, 0.55); }
+
+.modal form {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.modal h3 { margin: 0; font-size: 14px; }
+.modal p { margin: 0; color: #9aa3b2; white-space: pre-wrap; }
+.modal input[type="text"] {
+  width: 100%;
+  background: #101317;
+  border: 1px solid #3a4150;
+  border-radius: 3px;
+  color: #d5d9e0;
+  font: inherit;
+  padding: 5px 7px;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.modal-buttons .primary { background: #33507a; border-color: #4a6fa5; color: #eaf0f8; }
+.modal-buttons .primary:hover { background: #3d5e8e; }
+.modal-buttons .primary.danger { background: #6b3a3a; border-color: #8a4a4a; color: #f0dede; }
+.modal-buttons .primary.danger:hover { background: #7d4444; }

@@ -17,6 +17,7 @@ import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          rotateAction, mirrorAction, deleteSelection, endMapDrag } from './mapview.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
 import { setSpaceHeld } from './screen.js';
+import { askText, askConfirm, showError } from './dialog.js';
 import { ui } from './hooks.js';
 
 const statusEl = document.getElementById("status");
@@ -64,6 +65,21 @@ function showTab(name) {
 
 
 
+/*
+   One row button. Clicks are stopped so they do not also select the row.
+*/
+function templateRowButton(label, title, extra, onClick) {
+  const b = document.createElement("button");
+  b.className = "tpl-btn" + (extra ? " " + extra : "");
+  b.textContent = label;
+  b.title = title;
+  b.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    onClick();
+  });
+  return b;
+}
+
 function renderTemplateList() {
   tplListEl.textContent = "";
   tplEmptyEl.style.display = state.templates.length ? "none" : "";
@@ -71,32 +87,22 @@ function renderTemplateList() {
   state.templates.forEach(function (t) {
     const li = document.createElement("li");
     li.className = "tpl-item" + (t.id === selectedTemplateId ? " selected" : "");
-    li.title = "Click to edit, double click to rename";
+    li.title = "Click to edit this template";
 
     const name = document.createElement("span");
     name.className = "tpl-name";
     name.textContent = t.name;
     li.appendChild(name);
 
-    const dup = document.createElement("button");
-    dup.className = "tpl-del";
-    dup.textContent = "+";
-    dup.title = "Duplicate this template";
-    dup.addEventListener("click", function (ev) {
-      ev.stopPropagation();
+    li.appendChild(templateRowButton("R", "Rename this template", "", function () {
+      renameTemplate(t.id);
+    }));
+    li.appendChild(templateRowButton("+", "Duplicate this template", "", function () {
       duplicateTemplate(t.id);
-    });
-    li.appendChild(dup);
-
-    const del = document.createElement("button");
-    del.className = "tpl-del";
-    del.textContent = "x";
-    del.title = "Delete this template";
-    del.addEventListener("click", function (ev) {
-      ev.stopPropagation();
+    }));
+    li.appendChild(templateRowButton("x", "Delete this template", "del", function () {
       deleteTemplate(t.id);
-    });
-    li.appendChild(del);
+    }));
 
     li.addEventListener("click", function () {
       setSelectedTemplate(t.id);
@@ -104,7 +110,6 @@ function renderTemplateList() {
       renderEditorHeader();
       drawEditor();
     });
-    li.addEventListener("dblclick", function () { renameTemplate(t.id); });
 
     tplListEl.appendChild(li);
   });
@@ -403,6 +408,9 @@ Object.assign(ui, {
   updateHistoryButtons: updateHistoryButtons,
   setStatus: setStatus,
   fitEditorView: fitView,
+  askText: askText,
+  askConfirm: askConfirm,
+  showError: showError,
 });
 
 export {

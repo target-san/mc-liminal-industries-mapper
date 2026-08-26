@@ -9,12 +9,19 @@ import * as store from '../src/store.js';
 import * as history from '../src/history.js';
 import * as paint from '../src/paint.js';
 import * as ops from '../src/ops.js';
+import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
-/* ops.js asks for confirmation before destructive edits. */
-globalThis.confirm = () => true;
-globalThis.alert = () => {};
-globalThis.prompt = () => 'renamed';
+/*
+   ops.js asks its questions through the UI hooks. Their defaults decline, so
+   tests must opt in explicitly -- which is the point: a confirmation that
+   defaults to yes is how destructive code slips through untested.
+*/
+let answerConfirm = true;
+hooks.askConfirm = () => Promise.resolve(answerConfirm);
+hooks.askText = () => Promise.resolve('renamed');
+hooks.showError = () => Promise.resolve();
+
 const mem = new Map();
 globalThis.localStorage = {
   getItem: (k) => (mem.has(k) ? mem.get(k) : null),
@@ -223,7 +230,7 @@ ok('a cell referencing a missing palette slot is rejected', rejected);
 /* ---- structural undo ---- */
 const nBefore = T.state.templates.length;
 const doomed = wallId;
-T.deleteTemplate(doomed);
+await T.deleteTemplate(doomed);
 ok('delete removes the template', T.state.templates.length === nBefore - 1);
 T.undo();
 ok('undo restores the deleted template', T.state.templates.length === nBefore);
@@ -231,7 +238,7 @@ ok('undo restores its id', T.state.templates.some((t) => t.id === doomed));
 ok('undo restores the selection', T.sel === doomed, `sel=${T.sel}`);
 
 /* ---- palette delete remaps every template ---- */
-T.addPaletteColor();
+await T.addPaletteColor();
 const newSlot = T.state.palette.length - 1;
 const t2 = T.state.templates.find((t) => t.id === doomed);
 T.beginStroke(t2);
@@ -239,7 +246,7 @@ T.paintCell(t2, 8, 8, newSlot);
 T.paintCell(t2, 8, 9, newSlot);
 T.endStroke();
 ok('painted with the new custom colour', t2.cells[T.cellIndex(8, 8)] === newSlot);
-T.deletePaletteColor(newSlot);
+await T.deletePaletteColor(newSlot);
 const t3 = T.state.templates.find((t) => t.id === doomed);
 ok('deleting a colour falls its tiles back to floor',
    t3.cells[T.cellIndex(8, 8)] === T.SLOT_FLOOR && t3.cells[T.cellIndex(8, 9)] === T.SLOT_FLOOR);
@@ -266,6 +273,32 @@ T.beginStroke(capTpl());
 T.paintCell(capTpl(), 30, 30, T.SLOT_VOID);
 T.endStroke();
 ok('a new action clears the redo stack', T.undoHistory.future.length === 0);
+
+/* ---- declining a dialog must change nothing ---- */
+answerConfirm = false;
+const keepId = T.state.templates[0].id;
+const keepCount = T.state.templates.length;
+await T.deleteTemplate(keepId);
+ok('a declined confirmation leaves the template in place',
+   T.state.templates.length === keepCount &&
+   T.state.templates.some((t) => t.id === keepId));
+
+const histBefore = T.undoHistory.past.length;
+const palBefore = T.state.palette.length;
+await T.deletePaletteColor(T.state.palette.length - 1);
+ok('a declined colour delete leaves the palette in place',
+   T.state.palette.length === palBefore);
+ok('a declined dialog records no undo entry',
+   T.undoHistory.past.length === histBefore, `${histBefore} -> ${T.undoHistory.past.length}`);
+
+/* the shipped defaults refuse, so an unbound UI cannot delete anything */
+const savedConfirm = hooks.askConfirm;
+hooks.askConfirm = () => Promise.resolve(false);
+await T.deleteTemplate(keepId);
+ok('the default hook declines rather than assuming yes',
+   T.state.templates.some((t) => t.id === keepId));
+hooks.askConfirm = savedConfirm;
+answerConfirm = true;
 
 /* ---- colour maths ---- */
 ok('mid grey inverts to a contrasting colour', T.invertColor('#808080') === '#ffffff');

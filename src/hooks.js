@@ -12,6 +12,18 @@ const ui = {
   updateHistoryButtons() {},
   setStatus() {},
   fitEditorView() {},
+
+  /*
+     Dialogs. The defaults stand in for "no UI attached" and deliberately
+     decline: a default that confirmed would turn a missing binding into
+     silent data loss.
+  */
+  askText: () => Promise.resolve(null),
+  askConfirm: () => Promise.resolve(false),
+  showError: (title, message) => {
+    console.error(title + ": " + message);
+    return Promise.resolve();
+  },
 };
 
 export {

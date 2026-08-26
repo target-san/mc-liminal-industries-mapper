@@ -9,6 +9,7 @@ import { clearHistory } from './history.js';
 import { markDirty } from './storage.js';
 import { fitView } from './editor.js';
 import { fitMapView, mapUI } from './mapview.js';
+import { ui } from './hooks.js';
 
 /* ============================================================
    Import / export
@@ -40,7 +41,7 @@ function importDocument(file) {
     try {
       doc = deserialize(JSON.parse(String(reader.result)));
     } catch (err) {
-      alert("Could not import this file:\n\n" + err.message);
+      ui.showError("Import failed", err.message);
       return;
     }
     setState(doc);
@@ -53,14 +54,20 @@ function importDocument(file) {
     fitMapView();
     markDirty();
   };
-  reader.onerror = function () { alert("Could not read the file."); };
+  reader.onerror = function () {
+    ui.showError("Import failed", "Could not read the file.");
+  };
   reader.readAsText(file);
 }
 
-function newDocument() {
+async function newDocument() {
   const hasContent = state.templates.length > 0 ||
                      Object.keys(state.map.placements).length > 0;
-  if (hasContent && !confirm("Discard the current document and start over?")) return;
+  if (hasContent) {
+    const yes = await ui.askConfirm("New document",
+      "Discard the current document and start over?", "Discard", true);
+    if (!yes) return;
+  }
   setState(createDocument());
   setSelectedTemplate(null);
   setPaletteSlot(SLOT_FLOOR);

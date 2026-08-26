@@ -36,16 +36,23 @@ function duplicateTemplate(id) {
   });
 }
 
-function deleteTemplate(id) {
+async function deleteTemplate(id) {
   const used = Object.keys(state.map.placements).some(function (key) {
     return state.map.placements[key].templateId === id;
   });
   if (used) {
-    alert("This template is still placed on the map.");
+    await ui.showError("Template in use",
+      "This template is still placed on the map. Delete those rooms first.");
     return;
   }
   const t = state.templates.find(function (x) { return x.id === id; });
-  if (t && !confirm("Delete template \"" + t.name + "\"?")) return;
+  if (!t) return;
+  const yes = await ui.askConfirm("Delete template",
+    "Delete \"" + t.name + "\"?", "Delete", true);
+  if (!yes) return;
+  /* The document can move on while a dialog is open, so nothing established
+     before the await may be trusted afterwards. */
+  if (!state.templates.some(function (x) { return x.id === id; })) return;
   withUndo(function () {
     state.templates = state.templates.filter(function (x) { return x.id !== id; });
     if (selectedTemplateId === id) {
@@ -55,15 +62,16 @@ function deleteTemplate(id) {
   });
 }
 
-function renameTemplate(id) {
+async function renameTemplate(id) {
   const t = state.templates.find(function (x) { return x.id === id; });
   if (!t) return;
-  const name = prompt("Template name:", t.name);
+  const name = await ui.askText("Rename template", t.name, "Rename");
   if (name === null) return;
   const trimmed = name.trim();
-  if (!trimmed || trimmed === t.name) return;
+  const target = state.templates.find(function (x) { return x.id === id; });
+  if (!target || !trimmed || trimmed === target.name) return;
   withUndo(function () {
-    t.name = trimmed;
+    target.name = trimmed;
     markDirty();
   });
 }
@@ -72,9 +80,10 @@ function renameTemplate(id) {
    Palette operations
    ============================================================ */
 
-function addPaletteColor() {
+async function addPaletteColor() {
   if (state.palette.length >= MAX_PALETTE) {
-    alert("The palette is full (" + MAX_PALETTE + " colours).");
+    await ui.showError("Palette full",
+      "The palette already holds " + MAX_PALETTE + " colours.");
     return;
   }
   withUndo(function () {
@@ -96,19 +105,27 @@ function addPaletteColor() {
    to floor, and every slot above it shifts down by one. The remap runs before
    the splice so it can still read the old indices.
 */
-function deletePaletteColor(slot) {
+async function deletePaletteColor(slot) {
   if (slot < RESERVED_COUNT || slot >= state.palette.length) return;
   const entry = state.palette[slot];
+  const entryId = entry.id;
 
   let used = 0;
   state.templates.forEach(function (t) {
     for (let i = 0; i < t.cells.length; i++) if (t.cells[i] === slot) used++;
   });
   const question = used
-    ? "Delete colour \"" + entry.name + "\"? " + used +
+    ? "Delete \"" + entry.name + "\"? " + used +
       " painted tile(s) will fall back to floor."
-    : "Delete colour \"" + entry.name + "\"?";
-  if (!confirm(question)) return;
+    : "Delete \"" + entry.name + "\"?";
+  const yes = await ui.askConfirm("Delete colour", question, "Delete", true);
+  if (!yes) return;
+
+  /* Re-resolve by identity: the palette may have been reordered or edited
+     while the dialog was open, which would leave the index pointing at a
+     different colour entirely. */
+  slot = state.palette.findIndex(function (e) { return e.id === entryId; });
+  if (slot < RESERVED_COUNT) return;
 
   withUndo(function () {
     state.templates.forEach(function (t) {
