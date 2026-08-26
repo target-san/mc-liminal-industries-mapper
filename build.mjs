@@ -7,10 +7,11 @@
    local web server just to try a change.
 */
 import * as esbuild from 'esbuild';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { watch as watchFile } from 'node:fs';
 
-const OUT = 'mapper.html';
+const OUT_DIR = 'dist';
+const OUT = `${OUT_DIR}/mapper.html`;
 const ASSETS = ['src/index.html', 'src/styles.css'];
 const watching = process.argv.includes('--watch');
 
@@ -21,6 +22,7 @@ async function emit(js) {
   const html = template
     .replace('/* @CSS@ */', () => css.trimEnd())
     .replace('/* @JS@ */', () => js.trimEnd());
+  await mkdir(OUT_DIR, { recursive: true });
   await writeFile(OUT, html);
   const kb = (Buffer.byteLength(html) / 1024).toFixed(1);
   console.log(`${new Date().toTimeString().slice(0, 8)}  wrote ${OUT}  ${kb} kB`);

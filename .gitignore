@@ -1,4 +1,4 @@
 node_modules/
 
 # Build output: regenerate with `npm run build`.
-mapper.html
+dist/

@@ -108,18 +108,18 @@ ok('placements survive the round-trip',
 /* ---- the released artifact itself ----
    Everything above tests the source graph. This tests the file that actually
    ships: it must boot, and it must not reach outside itself. */
-const html = await readFile('mapper.html', 'utf8');
+const html = await readFile('dist/mapper.html', 'utf8');
 const inline = html.split('<script>\n')[1].split('\n</script>')[0];
 
 let bootError = null;
 try {
   const sandbox = makeSandbox();
   vm.createContext(sandbox);
-  vm.runInContext(inline, sandbox, { filename: 'mapper.html' });
+  vm.runInContext(inline, sandbox, { filename: 'dist/mapper.html' });
 } catch (err) {
   bootError = err;
 }
-ok('the built mapper.html boots', !bootError, bootError && bootError.message);
+ok('the built dist/mapper.html boots', !bootError, bootError && bootError.message);
 ok('the built file carries its stylesheet inline', html.includes('.canvas-wrap canvas'));
 ok('the built file has no external references',
    !/\b(?:src|href)\s*=\s*["']https?:/i.test(html));
