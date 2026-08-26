@@ -10,6 +10,7 @@ import * as history from '../src/history.js';
 import * as paint from '../src/paint.js';
 import * as ops from '../src/ops.js';
 import * as edges from '../src/edges.js';
+import * as storage from '../src/storage.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
@@ -30,7 +31,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -393,6 +394,26 @@ const seenEdges = [];
 T.eachAdjacency((gx, gy, dir) => seenEdges.push(dir + ':' + gx + ',' + gy));
 ok('each adjacency is visited exactly once',
    seenEdges.length === 2 && new Set(seenEdges).size === 2, seenEdges.join(' '));
+
+/* ---- the stored map view refuses anything it cannot trust ---- */
+const VIEW_KEY = 'liminal-industries-mapper.view.v1';
+
+T.saveMapView({ scale: 2.5, cu: 100, cv: -40 });
+T.flushSave();
+const rv = T.loadMapView();
+ok('a map view round-trips through storage',
+   rv && rv.scale === 2.5 && rv.cu === 100 && rv.cv === -40, JSON.stringify(rv));
+
+mem.set(VIEW_KEY, '{"scale":"wide","cu":0,"cv":0}');
+ok('a non-numeric scale is rejected', T.loadMapView() === null);
+mem.set(VIEW_KEY, '{"scale":0,"cu":0,"cv":0}');
+ok('a zero scale is rejected', T.loadMapView() === null);
+mem.set(VIEW_KEY, '{"scale":2,"cu":null,"cv":0}');
+ok('a missing centre is rejected', T.loadMapView() === null);
+mem.set(VIEW_KEY, 'not json at all');
+ok('unparseable view data is rejected', T.loadMapView() === null);
+mem.delete(VIEW_KEY);
+ok('no stored view yields null', T.loadMapView() === null);
 
 /* ---- colour maths ---- */
 ok('mid grey inverts to a contrasting colour', T.invertColor('#808080') === '#ffffff');

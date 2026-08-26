@@ -9,7 +9,7 @@ import { sharedPassages, edgeConnects, edgeOpenable, isEdgeOpen, toggleEdge,
          edgesTouching, pruneEdgesAt, eachAdjacency, edgeTile, runsOf,
          parseEdgeKey, EDGE_LO, EDGE_HI } from './edges.js';
 import { state, templateBitmaps } from './store.js';
-import { markDirty } from './storage.js';
+import { markDirty, saveMapView, loadMapView } from './storage.js';
 import { withUndo } from './history.js';
 import { dpr, setDpr, spaceHeld } from './screen.js';
 
@@ -43,7 +43,11 @@ const mctx        = mapCanvasEl.getContext("2d");
 
 let mapW = 0, mapH = 0;
 
+/* Cleared by the first measurement worth restoring or fitting to. */
+let mapNeedsFit = true;
+
 function resizeMapCanvas() {
+  setDpr(window.devicePixelRatio || 1);
   const rect = mapWrapEl.getBoundingClientRect();
   if (!rect.width || !rect.height) return;   // panel is hidden
   mapW = rect.width;
@@ -51,7 +55,37 @@ function resizeMapCanvas() {
   mapCanvasEl.width  = Math.max(1, Math.round(mapW * dpr));
   mapCanvasEl.height = Math.max(1, Math.round(mapH * dpr));
   mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  /*
+     The first time the canvas has a real size, put the viewport where the
+     last session left it -- or fit the map if there is nothing stored.
+     Without this the map opened on grid cell 0,0 in the top-left corner
+     however far away the rooms actually were.
+  */
+  if (mapNeedsFit) {
+    mapNeedsFit = false;
+    const stored = loadMapView();
+    if (stored) applyMapView(stored);
+    else fitMapView();
+  }
+
   drawMap();
+}
+
+/* Restores a stored viewport, re-centring it for the current window size. */
+function applyMapView(v) {
+  mapUI.view.scale = Math.max(MIN_MAP_SCALE, Math.min(MAX_MAP_SCALE, v.scale));
+  mapUI.view.ox = mapW / 2 - v.cu * mapUI.view.scale;
+  mapUI.view.oy = mapH / 2 - v.cv * mapUI.view.scale;
+}
+
+function rememberMapView() {
+  if (!mapW || !mapH || !mapUI.view.scale) return;
+  saveMapView({
+    scale: mapUI.view.scale,
+    cu: (mapW / 2 - mapUI.view.ox) / mapUI.view.scale,
+    cv: (mapH / 2 - mapUI.view.oy) / mapUI.view.scale,
+  });
 }
 
 /* ---------- Bitmap cache ---------- */
@@ -172,6 +206,7 @@ function fitMapCenter() {
   const cv = b.gy0 * GRID_PITCH + ((b.gy1 - b.gy0 + 1) * GRID_PITCH + 1) / 2;
   mapUI.view.ox = mapW / 2 - cu * mapUI.view.scale;
   mapUI.view.oy = mapH / 2 - cv * mapUI.view.scale;
+  rememberMapView();
 }
 
 function fitMapView() {
@@ -187,6 +222,7 @@ function fitMapView() {
   const cv = b.gy0 * GRID_PITCH + spanV / 2;
   mapUI.view.ox = mapW / 2 - cu * mapUI.view.scale;
   mapUI.view.oy = mapH / 2 - cv * mapUI.view.scale;
+  rememberMapView();
 }
 
 /* ---------- Drawing ---------- */
@@ -470,7 +506,8 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
   mapCanvasEl.setPointerCapture(ev.pointerId);
   const p = mapPointerPos(ev);
 
-  if (ev.button === 1 || spaceHeld) {
+  /* Right and middle drag both pan, as does holding space. */
+  if (ev.button === 1 || ev.button === 2 || spaceHeld) {
     mapUI.drag = { mode: "pan", lastX: p.x, lastY: p.y };
     mapWrapEl.classList.add("panning");
     ev.preventDefault();
@@ -510,6 +547,7 @@ mapCanvasEl.addEventListener("pointermove", function (ev) {
     mapUI.view.oy += p.y - drag.lastY;
     drag.lastX = p.x;
     drag.lastY = p.y;
+    rememberMapView();
     drawMap();
     return;
   }
@@ -547,6 +585,7 @@ mapCanvasEl.addEventListener("wheel", function (ev) {
   v.ox = p.x - (p.x - v.ox) * (next / v.scale);
   v.oy = p.y - (p.y - v.oy) * (next / v.scale);
   v.scale = next;
+  rememberMapView();
   updateMapFoot();
   drawMap();
 }, { passive: false });
@@ -678,6 +717,8 @@ function updateMapFoot() {
 
 export {
   mapUI,
+  MIN_MAP_SCALE,
+  MAX_MAP_SCALE,
   mapWrapEl,
   templateBitmap,
   roomBitmap,
@@ -699,5 +740,7 @@ export {
   updateMapFoot,
   setMapMode,
   edgeAt,
+  applyMapView,
+  rememberMapView,
   endMapDrag,
 };

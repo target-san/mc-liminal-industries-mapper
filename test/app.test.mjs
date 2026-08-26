@@ -17,6 +17,37 @@ const { ok, totals } = checker('app');
 ok('the bundle boots against a DOM', typeof T.drawMap === 'function');
 ok('late-bound UI hooks were registered', typeof T.refreshAll === 'function');
 
+/* ---- the editor fits the room on load ----
+   The stub reports a 900x700 container, so the expected fit is computable:
+   the ruler bands take (18 + 10) * 2 px, and the room squares off in what
+   is left of the shorter side. */
+{
+  const v = T.editor.view;
+  const expected = (Math.min(900, 700) - (18 + 10) * 2) / T.ROOM_SIZE;
+  const span = T.ROOM_SIZE * v.scale;
+  ok('the editor fits the room on load', Math.abs(v.scale - expected) < 1e-9,
+     `scale=${v.scale} expected=${expected}`);
+  ok('and centres it', Math.abs(v.ox + span / 2 - 450) < 1e-6 &&
+                       Math.abs(v.oy + span / 2 - 350) < 1e-6);
+  ok('so the whole room is on screen',
+     v.ox >= 0 && v.oy >= 0 && v.ox + span <= 900 && v.oy + span <= 700);
+
+  /* A hidden panel measures zero; that must not collapse the view. */
+  const kept = { scale: v.scale, ox: v.ox, oy: v.oy };
+  T.wrapEl.rect = { left: 0, top: 0, width: 0, height: 0 };
+  T.resizeCanvas();
+  ok('a zero-sized container leaves the view alone',
+     v.scale === kept.scale && v.ox === kept.ox && v.oy === kept.oy);
+  T.wrapEl.rect = { left: 0, top: 0, width: 900, height: 700 };
+
+  /* Only the first real measurement refits: a chosen zoom must survive. */
+  v.scale = 3;
+  v.ox = 11;
+  T.resizeCanvas();
+  ok('a later resize keeps the zoom you chose', v.scale === 3 && v.ox === 11);
+  T.fitView();
+}
+
 /* ---- placement, orientation, deletion ---- */
 T.addTemplate();
 const brushId = T.state.templates[T.state.templates.length - 1].id;
@@ -174,6 +205,37 @@ T.saveNow();
 const withDoors = T.loadFromStorage();
 ok('open walls survive a save and reload',
    withDoors && withDoors.map.openEdges.has('V:10,10'));
+
+/* ---- the map is the default tab ---- */
+ok('the map tab is the one shown on load', T.activeTab === 'map');
+
+/* ---- the viewport survives a reload ---- */
+T.mapUI.view.scale = 4;
+T.mapUI.view.ox = -137;
+T.mapUI.view.oy = 82;
+const wantCu = (900 / 2 - T.mapUI.view.ox) / 4;
+const wantCv = (700 / 2 - T.mapUI.view.oy) / 4;
+
+T.rememberMapView();
+T.flushSave();
+const view = T.loadMapView();
+ok('the stored view is the viewport centre in tile space',
+   view && view.scale === 4 &&
+   Math.abs(view.cu - wantCu) < 1e-9 && Math.abs(view.cv - wantCv) < 1e-9,
+   JSON.stringify(view));
+
+T.mapUI.view.scale = 1;
+T.mapUI.view.ox = 0;
+T.mapUI.view.oy = 0;
+T.applyMapView(view);
+ok('restoring reproduces the same viewport',
+   T.mapUI.view.scale === 4 &&
+   Math.abs(T.mapUI.view.ox + 137) < 1e-9 && Math.abs(T.mapUI.view.oy - 82) < 1e-9);
+
+T.applyMapView({ scale: 9999, cu: 0, cv: 0 });
+ok('an out-of-range stored scale is clamped', T.mapUI.view.scale === T.MAX_MAP_SCALE);
+T.applyMapView({ scale: 0.0001, cu: 0, cv: 0 });
+ok('and clamped at the other end', T.mapUI.view.scale === T.MIN_MAP_SCALE);
 
 /* ---- the released artifact itself ----
    Everything above tests the source graph. This tests the file that actually

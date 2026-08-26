@@ -48,7 +48,7 @@ const palEditEl   = document.getElementById("pal-edit");
 const mapInfoEl   = document.getElementById("map-info");
 
 
-let activeTab = "rooms";
+let activeTab = "map";
 
 function showTab(name) {
   activeTab = name;

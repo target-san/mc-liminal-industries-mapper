@@ -49,14 +49,36 @@ const ctx      = canvasEl.getContext("2d");
 
 let canvasW = 0, canvasH = 0;
 
+/* Cleared by the first measurement worth fitting to. See resizeCanvas. */
+let needsFit = true;
+
 function resizeCanvas() {
   setDpr(window.devicePixelRatio || 1);
   const rect = wrapEl.getBoundingClientRect();
+
+  /* A hidden panel measures zero. Keeping the last good size means a trip to
+     the map tab does not collapse the view on the way back. */
+  if (!rect.width || !rect.height) return;
+
   canvasW = rect.width;
   canvasH = rect.height;
   canvasEl.width  = Math.max(1, Math.round(canvasW * dpr));
   canvasEl.height = Math.max(1, Math.round(canvasH * dpr));
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  /*
+     Fit to the first real measurement rather than to whatever the box
+     happened to be during boot. An embedded browser can report a tiny or
+     zero-height container on its first layout pass, and a fit computed
+     against that leaves the room stranded small in a corner with nothing
+     ever recomputing it. Only the first one refits, so a zoom you chose
+     yourself survives every later resize.
+  */
+  if (needsFit) {
+    needsFit = false;
+    fitView();
+  }
+
   drawEditor();
 }
 
@@ -284,18 +306,20 @@ canvasEl.addEventListener("pointerdown", function (ev) {
   canvasEl.setPointerCapture(ev.pointerId);
   const p = pointerPos(ev);
 
-  const wantPan = ev.button === 1 || spaceHeld;
+  /* Right and middle drag both pan, as does holding space. */
+  const wantPan = ev.button === 1 || ev.button === 2 || spaceHeld;
   if (wantPan) {
     editor.drag = { mode: "pan", lastX: p.x, lastY: p.y };
     wrapEl.classList.add("panning");
     ev.preventDefault();
     return;
   }
-  if (ev.button !== 0 && ev.button !== 2) return;
+  if (ev.button !== 0) return;
 
   const tile = tileAt(p.x, p.y);
   if (!tile) return;
-  const erase = ev.button === 2;
+  /* Erase moved to shift-drag when the right button became a pan gesture. */
+  const erase = ev.shiftKey;
 
   if (editor.tool === "pick") {
     setPaletteSlot(t.cells[cellIndex(tile.r, tile.c)]);

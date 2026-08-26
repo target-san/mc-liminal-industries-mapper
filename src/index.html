@@ -13,8 +13,8 @@
 <div id="header">
   <span id="title">Liminal Industries Mapper</span>
   <div id="tabs">
-    <button class="tab-btn active" data-tab="rooms">Rooms</button>
-    <button class="tab-btn" data-tab="map">Map</button>
+    <button class="tab-btn active" data-tab="map">Map</button>
+    <button class="tab-btn" data-tab="rooms">Rooms</button>
   </div>
   <div id="file-actions">
     <span id="status">loading</span>
@@ -27,7 +27,7 @@
 
 <div id="main">
 
-  <div class="panel active" id="panel-rooms">
+  <div class="panel" id="panel-rooms">
 
     <div class="side">
       <h2>Templates</h2>
@@ -64,7 +64,8 @@
         <span id="editor-cell"></span>
         <span class="grow" style="flex:1 1 auto"></span>
         <span id="editor-zoom"></span>
-        <span>drag: paint &middot; right-drag: erase &middot; middle-drag or space: pan &middot; wheel: zoom</span>
+        <span>drag: paint &middot; shift-drag: erase &middot;
+              right-drag, middle-drag or space: pan &middot; wheel: zoom</span>
       </div>
       <div class="stage-center" id="editor-empty" style="display:none">
         <div class="card">
@@ -91,7 +92,7 @@
 
   </div>
 
-  <div class="panel" id="panel-map">
+  <div class="panel active" id="panel-map">
 
     <div class="side">
       <h2>Place room</h2>
@@ -129,7 +130,8 @@
         <span class="grow" style="flex:1 1 auto"></span>
         <span id="map-info"></span>
         <span id="map-zoom"></span>
-        <span>click: place or select &middot; middle-drag or space: pan &middot; wheel: zoom</span>
+        <span>click: place or select &middot;
+              right-drag, middle-drag or space: pan &middot; wheel: zoom</span>
       </div>
     </div>
 
