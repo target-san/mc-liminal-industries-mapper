@@ -9,6 +9,7 @@ import * as store from '../src/store.js';
 import * as history from '../src/history.js';
 import * as paint from '../src/paint.js';
 import * as ops from '../src/ops.js';
+import * as edges from '../src/edges.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
@@ -29,7 +30,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -299,6 +300,99 @@ ok('the default hook declines rather than assuming yes',
    T.state.templates.some((t) => t.id === keepId));
 hooks.askConfirm = savedConfirm;
 answerConfirm = true;
+
+/* ================= phase 4: walls between rooms ================= */
+
+/* A clean document, so earlier tests' paint strokes cannot skew this. */
+T.setState(T.createDocument());
+const roomA = T.createTemplate('A');
+const roomB = T.createTemplate('B');
+T.state.templates.push(roomA, roomB);
+
+function place(gx, gy, id, rot, mir) {
+  T.state.map.placements[T.placementKey(gx, gy)] =
+    { templateId: id, rot: rot || 0, mir: mir === true };
+}
+
+place(0, 0, roomA.id);
+place(1, 0, roomB.id);
+
+const shared = T.sharedPassages(0, 0, 'V');
+ok('two default rooms share their 5 doorway tiles',
+   shared.join(',') === '21,22,23,24,25', shared.join(','));
+ok('the shared line never includes a corner',
+   shared.every((i) => i >= T.EDGE_LO && i <= T.EDGE_HI) &&
+   T.EDGE_LO === 1 && T.EDGE_HI === T.ROOM_MAX - 1);
+ok('the edge is openable', T.edgeOpenable(0, 0, 'V'));
+ok('the edge starts closed', !T.isEdgeOpen(0, 0, 'V'));
+
+/* the shared tile really is one room's far wall and the other's near wall */
+const loc = T.edgeLocal('V', 23);
+ok('a vertical edge is A\'s right wall and B\'s left wall',
+   loc.a.c === T.ROOM_MAX && loc.b.c === 0 && loc.a.r === 23 && loc.b.r === 23);
+const gt = T.edgeTile(0, 0, 'V', 23);
+ok('the shared tile is at the pitch boundary', gt.u === T.GRID_PITCH && gt.v === 23);
+
+/* rotation and mirroring must not break a symmetric room's doorways */
+let alignedEverywhere = true;
+for (let rot = 0; rot < 4; rot++) for (const mir of [false, true]) {
+  place(1, 0, roomB.id, rot, mir);
+  if (T.sharedPassages(0, 0, 'V').join(',') !== '21,22,23,24,25') alignedEverywhere = false;
+}
+ok('a default room stays aligned in all 8 orientations', alignedEverywhere);
+place(1, 0, roomB.id);
+
+/* horizontal edges work the same way */
+place(0, 1, roomB.id);
+ok('a horizontal edge shares the same 5 tiles',
+   T.sharedPassages(0, 1 - 1, 'H').join(',') === '21,22,23,24,25');
+delete T.state.map.placements[T.placementKey(0, 1)];
+
+/* ---- toggling ---- */
+ok('toggle opens the edge', T.toggleEdge(0, 0, 'V') && T.isEdgeOpen(0, 0, 'V'));
+ok('toggle closes it again', T.toggleEdge(0, 0, 'V') && !T.isEdgeOpen(0, 0, 'V'));
+T.toggleEdge(0, 0, 'V');
+T.undo();
+ok('opening a wall is one undo step', !T.isEdgeOpen(0, 0, 'V'));
+
+/* ---- a wall with no overlap cannot be opened ---- */
+const sealed = T.createTemplate('sealed');
+for (let i = 21; i <= 25; i++) {
+  sealed.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;         // brick up the left wall
+  sealed.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
+}
+T.state.templates.push(sealed);
+place(1, 0, sealed.id);
+ok('a bricked-up wall shares nothing', T.sharedPassages(0, 0, 'V').length === 0);
+ok('and cannot be opened', !T.edgeOpenable(0, 0, 'V'));
+ok('toggling it is refused', T.toggleEdge(0, 0, 'V') === false && !T.isEdgeOpen(0, 0, 'V'));
+
+/* ---- an edge that stops lining up gets pruned ---- */
+place(1, 0, roomB.id);
+T.toggleEdge(0, 0, 'V');
+ok('reopened after restoring the neighbour', T.isEdgeOpen(0, 0, 'V'));
+place(1, 0, sealed.id);
+T.pruneEdgesAt(1, 0);
+ok('pruning drops a wall that no longer lines up', !T.isEdgeOpen(0, 0, 'V'));
+
+/* ---- an edge needs rooms on both sides ---- */
+delete T.state.map.placements[T.placementKey(1, 0)];
+ok('a wall with nothing behind it does not connect', !T.edgeConnects(0, 0, 'V'));
+ok('and shares nothing', T.sharedPassages(0, 0, 'V').length === 0);
+
+/* ---- run grouping, used for drawing doorways ---- */
+ok('consecutive indices collapse into one run',
+   JSON.stringify(T.runsOf([21, 22, 23, 24, 25])) === '[[21,25]]');
+ok('gaps split runs',
+   JSON.stringify(T.runsOf([3, 4, 10, 11, 12, 20])) === '[[3,4],[10,12],[20,20]]');
+ok('an empty list yields no runs', T.runsOf([]).length === 0);
+
+/* ---- adjacency enumeration visits each wall once ---- */
+place(0, 0, roomA.id); place(1, 0, roomA.id); place(0, 1, roomA.id);
+const seenEdges = [];
+T.eachAdjacency((gx, gy, dir) => seenEdges.push(dir + ':' + gx + ',' + gy));
+ok('each adjacency is visited exactly once',
+   seenEdges.length === 2 && new Set(seenEdges).size === 2, seenEdges.join(' '));
 
 /* ---- colour maths ---- */
 ok('mid grey inverts to a contrasting colour', T.invertColor('#808080') === '#ffffff');

@@ -13,6 +13,7 @@ export * as paint from '../src/paint.js';
 export * as ops from '../src/ops.js';
 export * as files from '../src/files.js';
 export * as editor from '../src/editor.js';
+export * as edges from '../src/edges.js';
 export * as mapview from '../src/mapview.js';
 export * as ui from '../src/ui.js';
 

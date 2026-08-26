@@ -14,7 +14,8 @@ import { editor, wrapEl, resizeCanvas, fitView, centerView, drawEditor, setTool,
          renderEditorHeader, updateEditorFoot, endDrag } from './editor.js';
 import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapTemplateList, updateMapBar, updateMapFoot,
-         rotateAction, mirrorAction, deleteSelection, endMapDrag } from './mapview.js';
+         rotateAction, mirrorAction, deleteSelection, setMapMode,
+         endMapDrag } from './mapview.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
 import { setSpaceHeld } from './screen.js';
 import { askText, askConfirm, showError } from './dialog.js';
@@ -291,6 +292,9 @@ document.getElementById("btn-zoom-1").addEventListener("click", function () {
   drawEditor();
 });
 
+document.getElementById("btn-map-doors").addEventListener("click", function () {
+  setMapMode(mapUI.mode === "doors" ? "place" : "doors");
+});
 document.getElementById("btn-map-rotate").addEventListener("click", rotateAction);
 document.getElementById("btn-map-mirror").addEventListener("click", mirrorAction);
 document.getElementById("btn-map-delete").addEventListener("click", deleteSelection);
@@ -361,6 +365,11 @@ window.addEventListener("keydown", function (ev) {
   const key = ev.key.toLowerCase();
 
   if (activeTab === "map") {
+    if (key === "d") {
+      ev.preventDefault();
+      setMapMode(mapUI.mode === "doors" ? "place" : "doors");
+      return;
+    }
     if (key === "r") { ev.preventDefault(); rotateAction(); return; }
     if (key === "m") { ev.preventDefault(); mirrorAction(); return; }
     if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -369,6 +378,7 @@ window.addEventListener("keydown", function (ev) {
       return;
     }
     if (ev.key === "Escape") {
+      if (mapUI.mode === "doors") { setMapMode("place"); return; }
       mapUI.selected = null;
       mapUI.brush = null;
       renderMapTemplateList();

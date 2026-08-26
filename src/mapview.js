@@ -4,7 +4,10 @@
 
 import { ROOM_SIZE, GRID_PITCH, CELL_COUNT, cellIndex, toTemplate,
          applyPlacementTransform, placementKey } from './geometry.js';
-import { parseHexColor } from './palette.js';
+import { parseHexColor, SLOT_PASSAGE, SLOT_WALL } from './palette.js';
+import { sharedPassages, edgeConnects, edgeOpenable, isEdgeOpen, toggleEdge,
+         edgesTouching, pruneEdgesAt, eachAdjacency, edgeTile, runsOf,
+         parseEdgeKey, EDGE_LO, EDGE_HI } from './edges.js';
 import { state, templateBitmaps } from './store.js';
 import { markDirty } from './storage.js';
 import { withUndo } from './history.js';
@@ -29,6 +32,8 @@ const mapUI = {
   mir: false,
   selected: null,     // placement key
   hover: null,        // { gx, gy }
+  hoverEdge: null,    // { gx, gy, dir } while in doors mode
+  mode: "place",      // "place" | "doors"
   drag: null,
 };
 
@@ -51,12 +56,7 @@ function resizeMapCanvas() {
 
 /* ---------- Bitmap cache ---------- */
 
-function templateBitmap(id) {
-  const cached = templateBitmaps.get(id);
-  if (cached) return cached;
-  const t = state.templates.find(function (x) { return x.id === id; });
-  if (!t) return null;
-
+function renderTemplateCanvas(t, wallInsteadOfPassage) {
   const cv = document.createElement("canvas");
   cv.width = ROOM_SIZE;
   cv.height = ROOM_SIZE;
@@ -67,13 +67,39 @@ function templateBitmap(id) {
   const rgb = state.palette.map(function (e) { return parseHexColor(e.color); });
   const fallback = [255, 0, 255];
   for (let i = 0; i < CELL_COUNT; i++) {
-    const c = rgb[t.cells[i]] || fallback;
+    let slot = t.cells[i];
+    if (wallInsteadOfPassage && slot === SLOT_PASSAGE) slot = SLOT_WALL;
+    const c = rgb[slot] || fallback;
     const o = i * 4;
     data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
   }
   g.putImageData(img, 0, 0);
-  templateBitmaps.set(id, cv);
   return cv;
+}
+
+function bitmapEntry(id) {
+  const cached = templateBitmaps.get(id);
+  if (cached) return cached;
+  const t = state.templates.find(function (x) { return x.id === id; });
+  if (!t) return null;
+  const entry = {
+    marks: renderTemplateCanvas(t, false),
+    map: renderTemplateCanvas(t, true),
+  };
+  templateBitmaps.set(id, entry);
+  return entry;
+}
+
+/* Possible doorways shown as passages: the editor and the sidebar thumbnails. */
+function templateBitmap(id) {
+  const e = bitmapEntry(id);
+  return e && e.marks;
+}
+
+/* Possible doorways shown as wall: the map, where only opened edges are holes. */
+function roomBitmap(id) {
+  const e = bitmapEntry(id);
+  return e && e.map;
 }
 
 /* ---------- View ---------- */
@@ -84,6 +110,35 @@ function mapCellAt(px, py) {
     gx: Math.floor((px - mapUI.view.ox) / pitch),
     gy: Math.floor((py - mapUI.view.oy) / pitch),
   };
+}
+
+/*
+   The edge nearest the pointer, or null. Only edges with rooms on both sides
+   are candidates: a wall with nothing behind it is not a door.
+*/
+function edgeAt(px, py) {
+  const pitch = GRID_PITCH * mapUI.view.scale;
+  if (pitch <= 0) return null;
+  const fx = (px - mapUI.view.ox) / pitch;
+  const fy = (py - mapUI.view.oy) / pitch;
+  const gx = Math.floor(fx), gy = Math.floor(fy);
+  const dx = fx - gx, dy = fy - gy;
+
+  /* Grab band: a slice of the cell, but never so thin that it becomes an
+     unhittable target when zoomed out. */
+  const near = Math.min(0.3, Math.max(0.08, 8 / pitch));
+
+  const cands = [];
+  if (dx < near)     cands.push({ gx: gx - 1, gy: gy, dir: "V", d: dx });
+  if (1 - dx < near) cands.push({ gx: gx,     gy: gy, dir: "V", d: 1 - dx });
+  if (dy < near)     cands.push({ gx: gx, gy: gy - 1, dir: "H", d: dy });
+  if (1 - dy < near) cands.push({ gx: gx, gy: gy,     dir: "H", d: 1 - dy });
+  cands.sort(function (a, b) { return a.d - b.d; });
+
+  for (let i = 0; i < cands.length; i++) {
+    if (edgeConnects(cands[i].gx, cands[i].gy, cands[i].dir)) return cands[i];
+  }
+  return null;
 }
 
 function globalTileAt(px, py) {
@@ -137,7 +192,7 @@ function fitMapView() {
 /* ---------- Drawing ---------- */
 
 function blitRoom(g, gx, gy, placement, alpha) {
-  const bmp = templateBitmap(placement.templateId);
+  const bmp = roomBitmap(placement.templateId);
   if (!bmp) return;
   const s = mapUI.view.scale;
   const pitch = GRID_PITCH * s;
@@ -159,6 +214,73 @@ function roomScreenRect(gx, gy) {
     w: ROOM_SIZE * s,
     h: ROOM_SIZE * s,
   };
+}
+
+function snap(v) {
+  return Math.round(v * dpr) / dpr;
+}
+
+/*
+   Opened doorways. Room bitmaps paint every possible passage as solid wall,
+   so the tiles both neighbours agree on are painted back in here -- which
+   also means a doorway automatically narrows or disappears if either room is
+   rotated out of alignment.
+*/
+function drawDoorways() {
+  const s = mapUI.view.scale;
+  const entry = state.palette[SLOT_PASSAGE];
+  mctx.fillStyle = entry ? entry.color : "#c89b3c";
+
+  state.map.openEdges.forEach(function (key) {
+    const e = parseEdgeKey(key);
+    const tiles = sharedPassages(e.gx, e.gy, e.dir);
+    if (!tiles.length) return;
+    runsOf(tiles).forEach(function (run) {
+      const t0 = edgeTile(e.gx, e.gy, e.dir, run[0]);
+      const len = run[1] - run[0] + 1;
+      const x = snap(mapUI.view.ox + t0.u * s);
+      const y = snap(mapUI.view.oy + t0.v * s);
+      const x1 = snap(mapUI.view.ox + (t0.u + (e.dir === "V" ? 1 : len)) * s);
+      const y1 = snap(mapUI.view.oy + (t0.v + (e.dir === "V" ? len : 1)) * s);
+      mctx.fillRect(x, y, x1 - x, y1 - y);
+    });
+  });
+}
+
+/* In doors mode every wall between two rooms is marked, so it is obvious
+   which ones can be opened before clicking anything. */
+function drawEdgeOverlay() {
+  const s = mapUI.view.scale;
+  const hovered = mapUI.hoverEdge;
+
+  eachAdjacency(function (gx, gy, dir) {
+    const open = isEdgeOpen(gx, gy, dir);
+    const openable = edgeOpenable(gx, gy, dir);
+    const isHover = hovered && hovered.gx === gx && hovered.gy === gy && hovered.dir === dir;
+
+    const a = edgeTile(gx, gy, dir, EDGE_LO);
+    const b = edgeTile(gx, gy, dir, EDGE_HI);
+    const x0 = mapUI.view.ox + a.u * s;
+    const y0 = mapUI.view.oy + a.v * s;
+    const x1 = mapUI.view.ox + (b.u + 1) * s;
+    const y1 = mapUI.view.oy + (b.v + 1) * s;
+
+    mctx.strokeStyle = isHover
+      ? (openable || open ? "#eaf0f8" : "#d05c5c")
+      : open ? "rgba(200,155,60,0.85)"
+      : openable ? "rgba(122,200,140,0.6)"
+      : "rgba(190,90,90,0.35)";
+    mctx.lineWidth = isHover ? 3 : 2;
+    mctx.beginPath();
+    if (dir === "V") {
+      const x = (x0 + x1) / 2;
+      mctx.moveTo(x, y0); mctx.lineTo(x, y1);
+    } else {
+      const y = (y0 + y1) / 2;
+      mctx.moveTo(x0, y); mctx.lineTo(x1, y);
+    }
+    mctx.stroke();
+  });
 }
 
 function drawMap() {
@@ -206,8 +328,11 @@ function drawMap() {
     blitRoom(mctx, gx, gy, state.map.placements[key]);
   });
 
+  drawDoorways();
+  if (mapUI.mode === "doors") drawEdgeOverlay();
+
   /* Ghost of what the brush would drop on the hovered slot. */
-  const h = mapUI.hover;
+  const h = mapUI.mode === "place" ? mapUI.hover : null;
   if (h && mapUI.brush && !state.map.placements[placementKey(h.gx, h.gy)]) {
     blitRoom(mctx, h.gx, h.gy,
              { templateId: mapUI.brush, rot: mapUI.rot, mir: mapUI.mir }, 0.45);
@@ -234,20 +359,48 @@ function drawMap() {
 
 /* ---------- Editing ---------- */
 
+function setMapMode(mode) {
+  mapUI.mode = mode;
+  if (mode === "doors") mapUI.selected = null;
+  mapUI.hoverEdge = null;
+  updateMapBar();
+  updateMapFoot();
+  drawMap();
+}
+
 function selectedPlacement() {
   if (!mapUI.selected) return null;
   return state.map.placements[mapUI.selected] || null;
 }
 
 function placeRoom(gx, gy) {
-  if (!mapUI.brush) return;
+  const templateId = mapUI.brush;
+  if (!templateId) return;
   const key = placementKey(gx, gy);
   if (state.map.placements[key]) return;
-  if (!state.templates.some(function (t) { return t.id === mapUI.brush; })) return;
+  if (!state.templates.some(function (t) { return t.id === templateId; })) return;
   withUndo(function () {
     state.map.placements[key] = {
-      templateId: mapUI.brush, rot: mapUI.rot, mir: mapUI.mir,
+      templateId: templateId, rot: mapUI.rot, mir: mapUI.mir,
     };
+    /*
+       Rooms that meet through matching doorways are almost always connected
+       in game, so those walls open by default rather than needing a visit to
+       doors mode for each one. Walls with no overlap stay shut, and any
+       deliberately closed wall can be shut again -- it is a default, not a
+       rule, and it lands in the same undo step as the placement.
+    */
+    edgesTouching(gx, gy).forEach(function (k) {
+      const e = parseEdgeKey(k);
+      if (edgeOpenable(e.gx, e.gy, e.dir)) state.map.openEdges.add(k);
+    });
+    /*
+       Placement is one shot: the brush is put down after a single room, and
+       the new room becomes the selection so Rotate, Mirror and Delete act on
+       what was just placed. Picking the template again places another.
+       This is view state, so undo does not restore the brush.
+    */
+    mapUI.brush = null;
     mapUI.selected = key;
     markDirty();
   });
@@ -258,7 +411,14 @@ function placeRoom(gx, gy) {
 function rotateAction() {
   const p = selectedPlacement();
   if (p) {
-    withUndo(function () { p.rot = (p.rot + 1) & 3; markDirty(); });
+    const at = mapUI.selected.split(",");
+    withUndo(function () {
+      p.rot = (p.rot + 1) & 3;
+      /* Turning a room can slide its doorways out of line with a neighbour's,
+         and an edge with no overlap left is no longer a door. */
+      pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
+      markDirty();
+    });
   } else {
     mapUI.rot = (mapUI.rot + 1) & 3;
     updateMapBar();
@@ -269,7 +429,12 @@ function rotateAction() {
 function mirrorAction() {
   const p = selectedPlacement();
   if (p) {
-    withUndo(function () { p.mir = !p.mir; markDirty(); });
+    const at = mapUI.selected.split(",");
+    withUndo(function () {
+      p.mir = !p.mir;
+      pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
+      markDirty();
+    });
   } else {
     mapUI.mir = !mapUI.mir;
     updateMapBar();
@@ -280,8 +445,13 @@ function mirrorAction() {
 function deleteSelection() {
   const key = mapUI.selected;
   if (!key || !state.map.placements[key]) return;
+  const at = key.split(",");
   withUndo(function () {
     delete state.map.placements[key];
+    /* A door needs rooms on both sides; with one gone the edge is meaningless. */
+    edgesTouching(parseInt(at[0], 10), parseInt(at[1], 10)).forEach(function (k) {
+      state.map.openEdges.delete(k);
+    });
     mapUI.selected = null;
     markDirty();
   });
@@ -307,6 +477,14 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
     return;
   }
   if (ev.button !== 0) return;
+
+  if (mapUI.mode === "doors") {
+    const e = edgeAt(p.x, p.y);
+    if (e) toggleEdge(e.gx, e.gy, e.dir);
+    updateMapFoot();
+    drawMap();
+    return;
+  }
 
   const cell = mapCellAt(p.x, p.y);
   const key = placementKey(cell.gx, cell.gy);
@@ -338,6 +516,7 @@ mapCanvasEl.addEventListener("pointermove", function (ev) {
 
   mapUI.hover = mapCellAt(p.x, p.y);
   mapUI.hoverTile = globalTileAt(p.x, p.y);
+  mapUI.hoverEdge = mapUI.mode === "doors" ? edgeAt(p.x, p.y) : null;
   updateMapFoot();
   drawMap();
 });
@@ -353,6 +532,7 @@ mapCanvasEl.addEventListener("pointercancel", endMapDrag);
 mapCanvasEl.addEventListener("pointerleave", function () {
   mapUI.hover = null;
   mapUI.hoverTile = null;
+  mapUI.hoverEdge = null;
   updateMapFoot();
   drawMap();
 });
@@ -424,6 +604,17 @@ function renderMapTemplateList() {
 
 function updateMapBar() {
   const sel = selectedPlacement();
+  const doors = mapUI.mode === "doors";
+
+  const btnDoors = document.getElementById("btn-map-doors");
+  if (btnDoors) btnDoors.classList.toggle("on", doors);
+
+  if (doors) {
+    mapBrushEl.textContent = "doors";
+    mapOrientEl.textContent = "click a wall between two rooms";
+    document.getElementById("btn-map-delete").disabled = true;
+    return;
+  }
   if (sel) {
     const t = state.templates.find(function (x) { return x.id === sel.templateId; });
     mapBrushEl.textContent = "selected: " + (t ? t.name : "?");
@@ -440,6 +631,23 @@ function updateMapBar() {
 }
 
 function updateMapFoot() {
+  if (mapUI.mode === "doors") {
+    const e = mapUI.hoverEdge;
+    if (e) {
+      const tiles = sharedPassages(e.gx, e.gy, e.dir);
+      mapPosEl.textContent = "wall " + e.dir + " " + e.gx + ", " + e.gy;
+      mapCellEl.textContent = tiles.length
+        ? (isEdgeOpen(e.gx, e.gy, e.dir) ? "open" : "closed") + ", " +
+          tiles.length + " shared doorway tile(s)"
+        : "cannot open: no doorway tiles in common";
+    } else {
+      mapPosEl.textContent = "wall -, -";
+      mapCellEl.textContent = "hover a wall between two rooms";
+    }
+    mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
+    return;
+  }
+
   const h = mapUI.hover;
   if (h) {
     mapPosEl.textContent = "cell " + h.gx + ", " + h.gy;
@@ -472,6 +680,7 @@ export {
   mapUI,
   mapWrapEl,
   templateBitmap,
+  roomBitmap,
   resizeMapCanvas,
   mapCellAt,
   globalTileAt,
@@ -488,5 +697,7 @@ export {
   renderMapTemplateList,
   updateMapBar,
   updateMapFoot,
+  setMapMode,
+  edgeAt,
   endMapDrag,
 };

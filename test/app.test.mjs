@@ -29,10 +29,16 @@ T.placeRoom(2, -1);
 ok('placing adds a room', Object.keys(T.state.map.placements).length === before + 1);
 ok('negative grid coordinates work', !!T.state.map.placements['2,-1']);
 ok('placing selects the new room', T.mapUI.selected === '2,-1');
+ok('placing puts the brush down', T.mapUI.brush === null);
 
+T.placeRoom(2, -1);
+ok('a spent brush places nothing', Object.keys(T.state.map.placements).length === before + 1);
+
+T.mapUI.brush = brushId;
 T.placeRoom(2, -1);
 ok('placing on an occupied slot is a no-op',
    Object.keys(T.state.map.placements).length === before + 1);
+ok('a refused placement keeps the brush armed', T.mapUI.brush === brushId);
 
 T.rotateAction();
 ok('rotate turns the selected room', T.state.map.placements['2,-1'].rot === 1);
@@ -104,6 +110,70 @@ ok('the autosaved document reloads',
 ok('placements survive the round-trip',
    reloaded && Object.keys(reloaded.map.placements).length ===
    Object.keys(T.state.map.placements).length);
+
+/* ================= phase 4: walls ================= */
+
+T.mapUI.brush = brushId;
+T.mapUI.rot = 0;
+T.mapUI.mir = false;
+T.mapUI.selected = null;
+
+T.placeRoom(10, 10);
+ok('a lone room opens no walls', !T.state.map.openEdges.has('V:10,10'));
+T.mapUI.brush = brushId;
+T.placeRoom(11, 10);
+ok('placing a neighbour opens the wall between them by default',
+   T.state.map.openEdges.has('V:10,10'));
+
+T.undo();
+ok('undo removes the room and the wall it opened together',
+   !T.state.map.placements['11,10'] && !T.state.map.openEdges.has('V:10,10'));
+T.redo();
+ok('redo restores both',
+   !!T.state.map.placements['11,10'] && T.state.map.openEdges.has('V:10,10'));
+
+T.mapUI.selected = '11,10';
+T.deleteSelection();
+ok('deleting a room drops the walls that led to it',
+   !T.state.map.openEdges.has('V:10,10'));
+T.undo();
+ok('undo brings the room and its wall back',
+   !!T.state.map.placements['11,10'] && T.state.map.openEdges.has('V:10,10'));
+
+/* ---- doors mode and edge hit testing ---- */
+T.setMapMode('doors');
+ok('doors mode clears the room selection',
+   T.mapUI.mode === 'doors' && T.mapUI.selected === null);
+
+T.mapUI.view.scale = 3;
+T.mapUI.view.ox = 0;
+T.mapUI.view.oy = 0;
+const pitch = T.GRID_PITCH * T.mapUI.view.scale;
+const onWall = T.edgeAt(11 * pitch, 10 * pitch + pitch / 2);
+ok('edgeAt finds the wall under the pointer',
+   onWall && onWall.dir === 'V' && onWall.gx === 10 && onWall.gy === 10,
+   JSON.stringify(onWall));
+ok('the middle of a room is not a wall',
+   T.edgeAt(10 * pitch + pitch / 2, 10 * pitch + pitch / 2) === null);
+
+T.toggleEdge(10, 10, 'V');
+ok('toggling from the map closes the wall', !T.state.map.openEdges.has('V:10,10'));
+T.toggleEdge(10, 10, 'V');
+ok('and opens it again', T.state.map.openEdges.has('V:10,10'));
+T.setMapMode('place');
+
+/* ---- both bitmap variants ---- */
+T.templateBitmaps.clear();
+const marks = T.templateBitmap(brushId);
+const room = T.roomBitmap(brushId);
+ok('the two bitmap variants are distinct canvases', marks && room && marks !== room);
+ok('both are cached under one entry', T.templateBitmaps.size === 1);
+
+/* ---- the whole thing still round-trips ---- */
+T.saveNow();
+const withDoors = T.loadFromStorage();
+ok('open walls survive a save and reload',
+   withDoors && withDoors.map.openEdges.has('V:10,10'));
 
 /* ---- the released artifact itself ----
    Everything above tests the source graph. This tests the file that actually

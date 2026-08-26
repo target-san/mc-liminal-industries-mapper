@@ -8,8 +8,14 @@ import { SLOT_FLOOR } from './palette.js';
 let state = createDocument();
 let selectedTemplateId = null;
 
-/* templateId -> 47x47 offscreen canvas, one pixel per tile. Rebuilt lazily and
-   dropped wholesale whenever the document changes. */
+/*
+   templateId -> { marks, map }: two 47x47 offscreen canvases, one pixel per
+   tile. `marks` paints possible doorways in the passage colour, for the
+   editor and the thumbnails. `map` paints them as solid wall, because on the
+   map a doorway only exists where an edge has actually been opened -- those
+   tiles are painted back over the blit. Both are dropped together whenever
+   the template changes.
+*/
 const templateBitmaps = new Map();
 
 function currentTemplate() {
