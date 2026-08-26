@@ -86,8 +86,11 @@ function open(opts) {
 }
 
 /* Resolves to the entered text, or null if cancelled. */
-function askText(title, value, okLabel) {
-  return open({ title: title, input: true, value: value, okLabel: okLabel || "OK" });
+function askText(title, value, okLabel, message) {
+  return open({
+    title: title, input: true, value: value,
+    okLabel: okLabel || "OK", message: message,
+  });
 }
 
 /* Resolves to true only on an explicit confirmation. */

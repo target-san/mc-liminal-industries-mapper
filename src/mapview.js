@@ -12,6 +12,9 @@ import { state, templateBitmaps } from './store.js';
 import { markDirty, saveMapView, loadMapView } from './storage.js';
 import { withUndo } from './history.js';
 import { dpr, setDpr, spaceHeld } from './screen.js';
+import { isAnchored, anchorOrigin, worldOfTile, tileOfWorld, setAnchor,
+         roomAtTile, parseWorldXZ, formatXZ } from './world.js';
+import { ui } from './hooks.js';
 
 /* ============================================================
    Map
@@ -33,7 +36,8 @@ const mapUI = {
   selected: null,     // placement key
   hover: null,        // { gx, gy }
   hoverEdge: null,    // { gx, gy, dir } while in doors mode
-  mode: "place",      // "place" | "doors"
+  mode: "place",      // "place" | "doors" | "anchor"
+  marker: null,       // { u, v, x, z } from the last position lookup
   drag: null,
 };
 
@@ -319,6 +323,41 @@ function drawEdgeOverlay() {
   });
 }
 
+/* A ring and crosshair on a tile, sized so it stays visible at any zoom. */
+function drawTileMarker(u, v, color, width) {
+  const s = mapUI.view.scale;
+  const x = mapUI.view.ox + (u + 0.5) * s;
+  const y = mapUI.view.oy + (v + 0.5) * s;
+  if (x < -40 || y < -40 || x > mapW + 40 || y > mapH + 40) return;
+
+  const rad = Math.max(4, Math.min(12, s * 1.5));
+  mctx.strokeStyle = color;
+  mctx.lineWidth = width;
+  mctx.beginPath();
+  mctx.arc(x, y, rad, 0, Math.PI * 2);
+  mctx.stroke();
+  mctx.beginPath();
+  mctx.moveTo(x - rad * 1.9, y); mctx.lineTo(x - rad * 0.6, y);
+  mctx.moveTo(x + rad * 0.6, y); mctx.lineTo(x + rad * 1.9, y);
+  mctx.moveTo(x, y - rad * 1.9); mctx.lineTo(x, y - rad * 0.6);
+  mctx.moveTo(x, y + rad * 0.6); mctx.lineTo(x, y + rad * 1.9);
+  mctx.stroke();
+}
+
+function drawMarkers() {
+  const o = anchorOrigin();
+  if (o) drawTileMarker(o.u, o.v, "rgba(122,162,247,0.9)", 1.5);
+  const m = mapUI.marker;
+  if (m) drawTileMarker(m.u, m.v, "#e0574f", 2.5);
+}
+
+function centreOnTile(u, v) {
+  if (!mapW || !mapH) return;
+  mapUI.view.ox = mapW / 2 - (u + 0.5) * mapUI.view.scale;
+  mapUI.view.oy = mapH / 2 - (v + 0.5) * mapUI.view.scale;
+  rememberMapView();
+}
+
 function drawMap() {
   if (!mapW || !mapH) return;
   if (mapUI.selected && !state.map.placements[mapUI.selected]) mapUI.selected = null;
@@ -383,6 +422,8 @@ function drawMap() {
     mctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
+  drawMarkers();
+
   /* Selection. */
   if (mapUI.selected) {
     const parts = mapUI.selected.split(",");
@@ -395,9 +436,71 @@ function drawMap() {
 
 /* ---------- Editing ---------- */
 
+/*
+   Binds one tile to a world position. Prefills with whatever the current
+   binding says that tile should be, so re-anchoring against a second known
+   point is a matter of correcting the number rather than retyping it.
+*/
+async function askAnchor(gx, gy, r, c) {
+  const u = gx * GRID_PITCH + c;
+  const v = gy * GRID_PITCH + r;
+  const current = worldOfTile(u, v);
+
+  const text = await ui.askText(
+    "Bind this tile to the world",
+    current ? current.x + " " + current.z : "",
+    "Bind",
+    "Stand on this tile in game and paste your F3 coordinates, or type X and Z.");
+  if (text === null) return;
+
+  const parsed = parseWorldXZ(text);
+  if (!parsed) {
+    await ui.showError("Could not read that",
+      "Give an X and a Z, for example \"128 -340\", or paste a whole F3 line.");
+    return;
+  }
+  setAnchor(gx, gy, r, c, parsed.x, parsed.z);
+  setMapMode("place");
+}
+
+/* Finds the room containing a world position and centres the view on it. */
+async function locatePosition() {
+  if (!isAnchored()) {
+    await ui.showError("Not bound yet",
+      "Use Anchor first: pick a tile you can stand on and give its coordinates.");
+    return;
+  }
+  const text = await ui.askText("Where are you?", "", "Find",
+    "Paste your F3 coordinates, or type X and Z.");
+  if (text === null) return;
+
+  const parsed = parseWorldXZ(text);
+  if (!parsed) {
+    await ui.showError("Could not read that",
+      "Give an X and a Z, for example \"128 -340\", or paste a whole F3 line.");
+    return;
+  }
+
+  const tile = tileOfWorld(parsed.x, parsed.z);
+  mapUI.marker = { u: tile.u, v: tile.v, x: parsed.x, z: parsed.z };
+
+  const room = roomAtTile(tile.u, tile.v);
+  mapUI.selected = room ? room.key : null;
+  centreOnTile(tile.u, tile.v);
+  updateMapBar();
+  updateMapFoot();
+  drawMap();
+
+  if (!room) {
+    await ui.showError("Outside the map",
+      formatXZ(parsed.x, parsed.z) + " falls on no placed room. " +
+      "The position is marked so you can see where it lands.");
+  }
+}
+
 function setMapMode(mode) {
   mapUI.mode = mode;
-  if (mode === "doors") mapUI.selected = null;
+  if (mode !== "place") mapUI.selected = null;
   mapUI.hoverEdge = null;
   updateMapBar();
   updateMapFoot();
@@ -514,6 +617,18 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
     return;
   }
   if (ev.button !== 0) return;
+
+  if (mapUI.mode === "anchor") {
+    const cell = mapCellAt(p.x, p.y);
+    const tile = globalTileAt(p.x, p.y);
+    if (!state.map.placements[placementKey(cell.gx, cell.gy)]) {
+      ui.showError("No room there", "Pick a tile inside a placed room.");
+      return;
+    }
+    askAnchor(cell.gx, cell.gy,
+              tile.v - cell.gy * GRID_PITCH, tile.u - cell.gx * GRID_PITCH);
+    return;
+  }
 
   if (mapUI.mode === "doors") {
     const e = edgeAt(p.x, p.y);
@@ -647,7 +762,15 @@ function updateMapBar() {
 
   const btnDoors = document.getElementById("btn-map-doors");
   if (btnDoors) btnDoors.classList.toggle("on", doors);
+  const btnAnchor = document.getElementById("btn-map-anchor");
+  if (btnAnchor) btnAnchor.classList.toggle("on", mapUI.mode === "anchor");
 
+  if (mapUI.mode === "anchor") {
+    mapBrushEl.textContent = "anchor";
+    mapOrientEl.textContent = "click the tile whose coordinates you know";
+    document.getElementById("btn-map-delete").disabled = true;
+    return;
+  }
   if (doors) {
     mapBrushEl.textContent = "doors";
     mapOrientEl.textContent = "click a wall between two rooms";
@@ -712,6 +835,15 @@ function updateMapFoot() {
     mapPosEl.textContent = "cell -, -";
     mapCellEl.textContent = "";
   }
+  /* World position under the cursor, once the map is bound. */
+  const tile = mapUI.hoverTile;
+  if (tile) {
+    const w = worldOfTile(tile.u, tile.v);
+    if (w) {
+      mapCellEl.textContent = (mapCellEl.textContent ? mapCellEl.textContent + "   " : "") +
+                              formatXZ(w.x, w.z);
+    }
+  }
   mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
 }
 
@@ -740,6 +872,9 @@ export {
   updateMapFoot,
   setMapMode,
   edgeAt,
+  askAnchor,
+  locatePosition,
+  centreOnTile,
   applyMapView,
   rememberMapView,
   endMapDrag,

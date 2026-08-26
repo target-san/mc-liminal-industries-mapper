@@ -11,6 +11,7 @@ import * as paint from '../src/paint.js';
 import * as ops from '../src/ops.js';
 import * as edges from '../src/edges.js';
 import * as storage from '../src/storage.js';
+import * as world from '../src/world.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
@@ -31,7 +32,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -394,6 +395,81 @@ const seenEdges = [];
 T.eachAdjacency((gx, gy, dir) => seenEdges.push(dir + ':' + gx + ',' + gy));
 ok('each adjacency is visited exactly once',
    seenEdges.length === 2 && new Set(seenEdges).size === 2, seenEdges.join(' '));
+
+/* ================= phase 5: world coordinates ================= */
+
+T.setState(T.createDocument());
+const wRoom = T.createTemplate('W');
+T.state.templates.push(wRoom);
+T.state.map.placements[T.placementKey(0, 0)] = { templateId: wRoom.id, rot: 0, mir: false };
+T.state.map.placements[T.placementKey(1, 0)] = { templateId: wRoom.id, rot: 0, mir: false };
+
+ok('an unbound map has no world position', T.worldOfTile(0, 0) === null);
+ok('and cannot be searched', T.tileOfWorld(0, 0) === null);
+
+/* room 0,0 tile r=10 c=20 is at X=100, Z=-200 */
+T.setAnchor(0, 0, 10, 20, 100, -200);
+ok('the map reports itself bound', T.isAnchored());
+ok('the anchor tile maps back to what was typed',
+   JSON.stringify(T.worldOfTile(20, 10)) === JSON.stringify({ x: 100, z: -200 }));
+
+/* one tile east is +1 X; one tile south is +1 Z */
+ok('columns run east', T.worldOfTile(21, 10).x === 101 && T.worldOfTile(21, 10).z === -200);
+ok('rows run south', T.worldOfTile(20, 11).z === -199 && T.worldOfTile(20, 11).x === 100);
+ok('and the axes do not swap', T.worldOfTile(25, 13).x === 105 && T.worldOfTile(25, 13).z === -197);
+
+let inverseOk = true;
+for (let u = -60; u <= 120; u += 7) for (let v = -60; v <= 120; v += 11) {
+  const w = T.worldOfTile(u, v);
+  const back = T.tileOfWorld(w.x, w.z);
+  if (back.u !== u || back.v !== v) inverseOk = false;
+}
+ok('tile and world coordinates invert exactly, negatives included', inverseOk);
+
+/* the anchor is document state, so it undoes */
+T.setAnchor(0, 0, 0, 0, 5, 5);
+ok('re-anchoring replaces the binding', T.worldOfTile(0, 0).x === 5);
+T.undo();
+ok('undo restores the previous binding', T.worldOfTile(20, 10).x === 100);
+
+/* ---- which room a tile belongs to ---- */
+ok('an interior tile belongs to its room', T.roomAtTile(20, 10).key === '0,0');
+ok('a tile in the second room belongs to it', T.roomAtTile(60, 10).key === '1,0');
+ok('a tile past the last room belongs to nothing', T.roomAtTile(200, 10) === null);
+
+/* the shared wall is in both cells at once; it must resolve to a real room */
+const sharedU = T.GRID_PITCH;
+ok('a shared wall tile resolves to a placed room',
+   T.roomAtTile(sharedU, 10) !== null);
+delete T.state.map.placements[T.placementKey(1, 0)];
+ok('with the right-hand room gone the shared wall falls back to the left one',
+   T.roomAtTile(sharedU, 10).key === '0,0');
+T.state.map.placements[T.placementKey(1, 0)] = { templateId: wRoom.id, rot: 0, mir: false };
+
+/* negative grid coordinates must not fall foul of JS modulo */
+T.state.map.placements[T.placementKey(-1, -1)] = { templateId: wRoom.id, rot: 0, mir: false };
+ok('a room at negative grid coordinates is found',
+   T.roomAtTile(-20, -20).key === '-1,-1');
+
+/* ---- reading coordinates the way they actually arrive ---- */
+ok('two plain numbers', JSON.stringify(T.parseWorldXZ('128 -340')) === '{"x":128,"z":-340}');
+ok('comma separated', JSON.stringify(T.parseWorldXZ('128, -340')) === '{"x":128,"z":-340}');
+ok('an F3 XYZ line drops the Y',
+   JSON.stringify(T.parseWorldXZ('XYZ: 123.456 / 64.00 / -678.90')) === '{"x":123,"z":-679}');
+ok('an F3 Block line drops the Y',
+   JSON.stringify(T.parseWorldXZ('Block: 123 64 -679')) === '{"x":123,"z":-679}');
+ok('fractions floor into the block they are inside',
+   T.parseWorldXZ('12.9 -0.5').x === 12 && T.parseWorldXZ('12.9 -0.5').z === -1);
+ok('one number is not a position', T.parseWorldXZ('128') === null);
+ok('no numbers is not a position', T.parseWorldXZ('somewhere over there') === null);
+ok('empty input is not a position', T.parseWorldXZ('') === null);
+ok('null input is handled', T.parseWorldXZ(null) === null);
+
+/* ---- clearing ---- */
+T.clearAnchor();
+ok('the binding can be removed', !T.isAnchored() && T.worldOfTile(0, 0) === null);
+T.undo();
+ok('and that undoes too', T.isAnchored());
 
 /* ---- the stored map view refuses anything it cannot trust ---- */
 const VIEW_KEY = 'liminal-industries-mapper.view.v1';

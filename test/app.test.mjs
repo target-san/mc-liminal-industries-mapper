@@ -206,6 +206,51 @@ const withDoors = T.loadFromStorage();
 ok('open walls survive a save and reload',
    withDoors && withDoors.map.openEdges.has('V:10,10'));
 
+/* ================= phase 5: world binding =================
+   The dialogs are driven through the hooks, so the flows can be exercised
+   end to end without a real modal ever opening. */
+T.ui.showError = () => Promise.resolve();
+
+T.setMapMode('anchor');
+ok('anchor mode clears the room selection',
+   T.mapUI.mode === 'anchor' && T.mapUI.selected === null);
+
+T.ui.askText = () => Promise.resolve('600 -200');
+await T.askAnchor(10, 10, 23, 23);
+ok('binding records an anchor', !!T.state.map.anchor);
+ok('binding drops back to place mode', T.mapUI.mode === 'place');
+ok('the bound tile reports exactly what was typed',
+   T.worldOfTile(10 * T.GRID_PITCH + 23, 10 * T.GRID_PITCH + 23).x === 600);
+
+/* look up a position inside the neighbouring room */
+const target = T.worldOfTile(11 * T.GRID_PITCH + 23, 10 * T.GRID_PITCH + 23);
+T.ui.askText = () => Promise.resolve(target.x + ' ' + target.z);
+await T.locatePosition();
+ok('locating marks the position',
+   T.mapUI.marker && T.mapUI.marker.x === target.x && T.mapUI.marker.z === target.z);
+ok('and selects the room it falls in', T.mapUI.selected === '11,10', T.mapUI.selected);
+ok('and centres the view on it',
+   Math.abs(T.mapUI.view.ox + (T.mapUI.marker.u + 0.5) * T.mapUI.view.scale - 450) < 1e-6 &&
+   Math.abs(T.mapUI.view.oy + (T.mapUI.marker.v + 0.5) * T.mapUI.view.scale - 350) < 1e-6);
+
+T.ui.askText = () => Promise.resolve('999999 999999');
+await T.locatePosition();
+ok('a position off the map still marks but selects nothing',
+   !!T.mapUI.marker && T.mapUI.selected === null);
+
+const boundTo = JSON.stringify(T.state.map.anchor);
+T.ui.askText = () => Promise.resolve(null);
+await T.askAnchor(10, 10, 1, 1);
+ok('cancelling the bind dialog changes nothing',
+   JSON.stringify(T.state.map.anchor) === boundTo);
+
+T.ui.askText = () => Promise.resolve('over by the vending machines');
+await T.askAnchor(10, 10, 1, 1);
+ok('unreadable coordinates are rejected rather than guessed at',
+   JSON.stringify(T.state.map.anchor) === boundTo);
+
+T.mapUI.marker = null;
+
 /* ---- the map is the default tab ---- */
 ok('the map tab is the one shown on load', T.activeTab === 'map');
 

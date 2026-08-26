@@ -15,7 +15,8 @@ import { editor, wrapEl, resizeCanvas, fitView, centerView, drawEditor, setTool,
 import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapTemplateList, updateMapBar, updateMapFoot,
          rotateAction, mirrorAction, deleteSelection, setMapMode,
-         endMapDrag } from './mapview.js';
+         locatePosition, endMapDrag } from './mapview.js';
+import { isAnchored, anchorOrigin, formatXZ } from './world.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
 import { setSpaceHeld } from './screen.js';
 import { askText, askConfirm, showError } from './dialog.js';
@@ -243,11 +244,11 @@ function renderPaletteEditor() {
 
 
 function refreshStats() {
-  const anchor = state.map.anchor;
+  const o = isAnchored() ? anchorOrigin() : null;
   mapInfoEl.textContent =
     Object.keys(state.map.placements).length + " rooms  |  " +
-    state.map.openEdges.size + " open edges  |  " +
-    (anchor ? "anchored" : "not anchored");
+    state.map.openEdges.size + " open walls  |  " +
+    (o ? "bound at " + formatXZ(o.x, o.z) : "not bound to the world");
 }
 
 function refreshAll() {
@@ -295,6 +296,10 @@ document.getElementById("btn-zoom-1").addEventListener("click", function () {
 document.getElementById("btn-map-doors").addEventListener("click", function () {
   setMapMode(mapUI.mode === "doors" ? "place" : "doors");
 });
+document.getElementById("btn-map-anchor").addEventListener("click", function () {
+  setMapMode(mapUI.mode === "anchor" ? "place" : "anchor");
+});
+document.getElementById("btn-map-locate").addEventListener("click", locatePosition);
 document.getElementById("btn-map-rotate").addEventListener("click", rotateAction);
 document.getElementById("btn-map-mirror").addEventListener("click", mirrorAction);
 document.getElementById("btn-map-delete").addEventListener("click", deleteSelection);
@@ -370,6 +375,16 @@ window.addEventListener("keydown", function (ev) {
       setMapMode(mapUI.mode === "doors" ? "place" : "doors");
       return;
     }
+    if (key === "a") {
+      ev.preventDefault();
+      setMapMode(mapUI.mode === "anchor" ? "place" : "anchor");
+      return;
+    }
+    if (key === "l") {
+      ev.preventDefault();
+      locatePosition();
+      return;
+    }
     if (key === "r") { ev.preventDefault(); rotateAction(); return; }
     if (key === "m") { ev.preventDefault(); mirrorAction(); return; }
     if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -378,7 +393,8 @@ window.addEventListener("keydown", function (ev) {
       return;
     }
     if (ev.key === "Escape") {
-      if (mapUI.mode === "doors") { setMapMode("place"); return; }
+      if (mapUI.mode !== "place") { setMapMode("place"); return; }
+      if (mapUI.marker) { mapUI.marker = null; drawMap(); return; }
       mapUI.selected = null;
       mapUI.brush = null;
       renderMapTemplateList();

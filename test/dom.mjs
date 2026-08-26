@@ -10,7 +10,7 @@ const ctxStub = new Proxy({
   measureText: () => ({ width: 10 }),
   createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
   setTransform: noop, fillRect: noop, strokeRect: noop, clearRect: noop,
-  beginPath: noop, moveTo: noop, lineTo: noop, stroke: noop, fill: noop,
+  beginPath: noop, moveTo: noop, lineTo: noop, stroke: noop, fill: noop, arc: noop,
   save: noop, restore: noop, fillText: noop,
   translate: noop, scale: noop, rotate: noop,
   drawImage: noop, putImageData: noop,

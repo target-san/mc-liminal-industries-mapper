@@ -7,6 +7,7 @@ export * as geometry from '../src/geometry.js';
 export * as palette from '../src/palette.js';
 export * as document_ from '../src/document.js';
 export * as store from '../src/store.js';
+export * as hooks from '../src/hooks.js';
 export * as storage from '../src/storage.js';
 export * as history from '../src/history.js';
 export * as paint from '../src/paint.js';
@@ -14,6 +15,7 @@ export * as ops from '../src/ops.js';
 export * as files from '../src/files.js';
 export * as editor from '../src/editor.js';
 export * as edges from '../src/edges.js';
+export * as world from '../src/world.js';
 export * as mapview from '../src/mapview.js';
 export * as ui from '../src/ui.js';
 
