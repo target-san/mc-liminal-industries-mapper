@@ -1,0 +1,16 @@
+{
+  "name": "liminal-industries-mapper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "External room and map planner for the Liminal Industries modpack",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "pretest": "node build.mjs",
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

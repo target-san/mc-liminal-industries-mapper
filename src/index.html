@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liminal Industries Mapper</title>
+<style>
+/* @CSS@ */
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span id="title">Liminal Industries Mapper</span>
+  <div id="tabs">
+    <button class="tab-btn active" data-tab="rooms">Rooms</button>
+    <button class="tab-btn" data-tab="map">Map</button>
+  </div>
+  <div id="file-actions">
+    <span id="status">loading</span>
+    <button id="btn-new" title="Discard everything and start over">New</button>
+    <button id="btn-import" title="Load a document from a JSON file">Import</button>
+    <button id="btn-export" title="Save the document to a JSON file">Export</button>
+    <input id="file-input" type="file" accept=".json,application/json" hidden>
+  </div>
+</div>
+
+<div id="main">
+
+  <div class="panel active" id="panel-rooms">
+
+    <div class="side">
+      <h2>Templates</h2>
+      <div class="side-body">
+        <ul class="tpl-list" id="tpl-list"></ul>
+        <div class="empty-note" id="tpl-empty">No templates yet.</div>
+      </div>
+      <div class="side-foot">
+        <button id="btn-new-template">New template</button>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="bar" id="editor-bar">
+        <span class="bar-name" id="editor-name">-</span>
+        <button id="btn-rename" title="Rename this template">Rename</button>
+        <span class="sep"></span>
+        <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+        <span class="sep"></span>
+        <button class="tool-btn" data-tool="pencil"  title="Pencil (B)">Pencil</button>
+        <button class="tool-btn" data-tool="rect"    title="Rectangle (R)">Rect</button>
+        <button class="tool-btn" data-tool="fill"    title="Flood fill (G)">Fill</button>
+        <button class="tool-btn" data-tool="pick"    title="Eyedropper (I)">Pick</button>
+        <span class="grow"></span>
+        <button id="btn-zoom-fit" title="Fit the room to the view">Fit</button>
+        <button id="btn-zoom-1" title="Zoom to 8 px per tile">1:1</button>
+      </div>
+      <div class="canvas-wrap" id="editor-wrap">
+        <canvas id="editor-canvas"></canvas>
+      </div>
+      <div class="foot">
+        <span id="editor-pos">tile -, -</span>
+        <span id="editor-cell"></span>
+        <span class="grow" style="flex:1 1 auto"></span>
+        <span id="editor-zoom"></span>
+        <span>drag: paint &middot; right-drag: erase &middot; middle-drag or space: pan &middot; wheel: zoom</span>
+      </div>
+      <div class="stage-center" id="editor-empty" style="display:none">
+        <div class="card">
+          <h3>No template selected</h3>
+          <p>Create a template on the left to start painting.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="side right">
+      <h2>Palette</h2>
+      <div class="side-body">
+        <div class="pal-sub">Reserved</div>
+        <ul class="pal-list" id="pal-reserved"></ul>
+        <div class="pal-sub">Custom</div>
+        <ul class="pal-list" id="pal-custom"></ul>
+        <div class="empty-note" id="pal-empty">No custom colours yet.</div>
+      </div>
+      <div class="edit-box" id="pal-edit"></div>
+      <div class="side-foot">
+        <button id="btn-add-color">Add colour</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="panel" id="panel-map">
+
+    <div class="side">
+      <h2>Place room</h2>
+      <div class="side-body">
+        <ul class="tpl-list" id="map-tpl-list"></ul>
+        <div class="empty-note" id="map-tpl-empty">
+          No templates yet. Create one on the Rooms tab first.
+        </div>
+      </div>
+      <div class="side-foot">
+        <button id="btn-map-clear-brush">Clear brush</button>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="bar" id="map-bar">
+        <span class="bar-name" id="map-brush">no brush</span>
+        <span class="orient" id="map-orient"></span>
+        <span class="sep"></span>
+        <button id="btn-map-rotate" title="Rotate 90 degrees clockwise (R)">Rotate</button>
+        <button id="btn-map-mirror" title="Mirror horizontally (M)">Mirror</button>
+        <button id="btn-map-delete" title="Delete the selected room (Del)">Delete</button>
+        <span class="grow"></span>
+        <button id="btn-map-fit" title="Fit the whole map to the view">Fit</button>
+        <button id="btn-map-1" title="Zoom to 2 px per tile">1:1</button>
+      </div>
+      <div class="canvas-wrap" id="map-wrap">
+        <canvas id="map-canvas"></canvas>
+      </div>
+      <div class="foot">
+        <span id="map-pos">cell -, -</span>
+        <span id="map-cell"></span>
+        <span class="grow" style="flex:1 1 auto"></span>
+        <span id="map-info"></span>
+        <span id="map-zoom"></span>
+        <span>click: place or select &middot; middle-drag or space: pan &middot; wheel: zoom</span>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+/* @JS@ */
+</script>
+</body>
+</html>
