@@ -251,6 +251,27 @@ ok('unreadable coordinates are rejected rather than guessed at',
 
 T.mapUI.marker = null;
 
+/* ================= phase 6: routing ================= */
+T.setMapMode('route');
+ok('route mode clears the room selection',
+   T.mapUI.mode === 'route' && T.mapUI.selected === null);
+
+T.mapUI.routeFrom = '10,10';
+T.mapUI.route = T.findRoute('10,10', '11,10');
+ok('the two adjoining rooms are connected through their opened wall',
+   T.mapUI.route && T.mapUI.route.cells.join('|') === '10,10|11,10');
+
+T.drawRoute();
+ok('drawing a live route keeps it', !!T.mapUI.route);
+
+T.mapUI.route = { cells: ['99,99'], edges: [] };
+T.drawRoute();
+ok('drawing drops a route whose rooms are gone', T.mapUI.route === null);
+
+T.setMapMode('place');
+ok('leaving route mode clears both ends',
+   T.mapUI.route === null && T.mapUI.routeFrom === null);
+
 /* ---- the map is the default tab ---- */
 ok('the map tab is the one shown on load', T.activeTab === 'map');
 

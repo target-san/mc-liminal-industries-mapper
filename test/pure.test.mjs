@@ -12,6 +12,7 @@ import * as ops from '../src/ops.js';
 import * as edges from '../src/edges.js';
 import * as storage from '../src/storage.js';
 import * as world from '../src/world.js';
+import * as route from '../src/route.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
 
@@ -32,7 +33,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world, route });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -395,6 +396,117 @@ const seenEdges = [];
 T.eachAdjacency((gx, gy, dir) => seenEdges.push(dir + ':' + gx + ',' + gy));
 ok('each adjacency is visited exactly once',
    seenEdges.length === 2 && new Set(seenEdges).size === 2, seenEdges.join(' '));
+
+/* ================= phase 6: routing ================= */
+
+T.setState(T.createDocument());
+const rt = T.createTemplate('R');
+T.state.templates.push(rt);
+const put = (gx, gy) => {
+  T.state.map.placements[T.placementKey(gx, gy)] = { templateId: rt.id, rot: 0, mir: false };
+};
+const open = (gx, gy, dir) => T.state.map.openEdges.add(T.edgeKey(gx, gy, dir));
+
+put(0, 0); put(1, 0); put(2, 0);
+
+ok('with every wall shut there is no route', T.findRoute('0,0', '2,0') === null);
+ok('a room routes to itself in one step',
+   JSON.stringify(T.findRoute('0,0', '0,0')) === '{"cells":["0,0"],"edges":[]}');
+ok('a room that is not placed has no route', T.findRoute('0,0', '9,9') === null);
+
+open(0, 0, 'V');
+ok('one open wall is still not enough to reach the far room',
+   T.findRoute('0,0', '2,0') === null);
+ok('but the adjacent room is reachable',
+   T.findRoute('0,0', '1,0').cells.join('|') === '0,0|1,0');
+
+open(1, 0, 'V');
+const line = T.findRoute('0,0', '2,0');
+ok('opening the second wall completes the route',
+   line && line.cells.join('|') === '0,0|1,0|2,0', line && line.cells.join('|'));
+ok('there is one wall crossing per room gap', line.edges.length === line.cells.length - 1);
+
+/* the polyline alternates room centre and doorway */
+const pts = T.routePoints(line);
+ok('the path runs centre, door, centre, door, centre', pts.length === 5);
+ok('it starts at the first room centre',
+   Math.abs(pts[0].u - (T.CENTER_TILE + 0.5)) < 1e-9);
+ok('the doorways sit on the shared wall columns',
+   Math.abs(pts[1].u - (T.GRID_PITCH + 0.5)) < 1e-9 &&
+   Math.abs(pts[3].u - (2 * T.GRID_PITCH + 0.5)) < 1e-9);
+ok('the walk is roughly two room pitches long',
+   Math.abs(T.routeLength(line) - 2 * T.GRID_PITCH) <= 2, String(T.routeLength(line)));
+
+/* neighbours honour the walls */
+ok('a shut wall is not a neighbour',
+   T.neighbours(2, 0).map((n) => n.key).join('|') === '1,0');
+
+/* breadth first must return the fewest rooms, not merely some route */
+put(0, 1); put(1, 1); put(2, 1);
+open(0, 1, 'V'); open(1, 1, 'V');
+open(0, 0, 'H'); open(2, 0, 'H');
+const short = T.findRoute('0,0', '2,1');
+ok('the route crosses the fewest rooms', short.cells.length === 4, short.cells.join('|'));
+
+/* A route goes stale when the map underneath it changes. Both checks work
+   off the route that was actually found: with two equally short options,
+   which one BFS returns is an implementation detail. */
+ok('a fresh route is valid', T.routeStillValid(short));
+
+const cut = short.edges[0];
+T.state.map.openEdges.delete(T.edgeKey(cut.gx, cut.gy, cut.dir));
+ok('closing a wall along the route invalidates it', !T.routeStillValid(short));
+open(cut.gx, cut.gy, cut.dir);
+ok('reopening it makes the route good again', T.routeStillValid(short));
+
+const midKey = short.cells[1];
+const midRoom = T.state.map.placements[midKey];
+delete T.state.map.placements[midKey];
+ok('removing a room along the route invalidates it', !T.routeStillValid(short));
+T.state.map.placements[midKey] = midRoom;
+ok('putting it back makes the route good again', T.routeStillValid(short));
+
+/* an unopenable wall is never walked, even if the edge got marked open */
+const brick = T.createTemplate('brick');
+for (let i = 21; i <= 25; i++) {
+  brick.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;
+  brick.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
+}
+T.state.templates.push(brick);
+T.setState(T.state);
+T.state.map.placements = {};
+T.state.map.openEdges.clear();
+put(0, 0);
+T.state.map.placements['1,0'] = { templateId: brick.id, rot: 0, mir: false };
+open(0, 0, 'V');
+ok('a wall with no shared doorway is not walkable even when marked open',
+   T.findRoute('0,0', '1,0') === null);
+
+/* ---- do a room's own doorways reach each other? ---- */
+const plain = T.createTemplate('plain');
+const plainCheck = T.templateExitsConnected(plain);
+ok('a default room connects all four doorways',
+   plainCheck.ok && plainCheck.exits === 20 && plainCheck.reached === 20,
+   JSON.stringify(plainCheck));
+
+const split = T.createTemplate('split');
+for (let i = 21; i <= 25; i++) {
+  split.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;          // leave only top and bottom doors
+  split.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
+}
+for (let c = 1; c <= 45; c++) split.cells[T.cellIndex(23, c)] = T.SLOT_VOID;
+const splitCheck = T.templateExitsConnected(split);
+ok('a room cut in half reports its doorways as disconnected',
+   !splitCheck.ok && splitCheck.exits === 10 && splitCheck.reached === 5,
+   JSON.stringify(splitCheck));
+
+const oneDoor = T.createTemplate('one');
+for (let i = 21; i <= 25; i++) {
+  oneDoor.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;
+  oneDoor.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
+  oneDoor.cells[T.cellIndex(T.ROOM_MAX, i)] = T.SLOT_WALL;
+}
+ok('a room with one doorway is trivially fine', T.templateExitsConnected(oneDoor).ok);
 
 /* ================= phase 5: world coordinates ================= */
 

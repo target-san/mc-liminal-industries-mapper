@@ -300,6 +300,9 @@ document.getElementById("btn-map-anchor").addEventListener("click", function () 
   setMapMode(mapUI.mode === "anchor" ? "place" : "anchor");
 });
 document.getElementById("btn-map-locate").addEventListener("click", locatePosition);
+document.getElementById("btn-map-route").addEventListener("click", function () {
+  setMapMode(mapUI.mode === "route" ? "place" : "route");
+});
 document.getElementById("btn-map-rotate").addEventListener("click", rotateAction);
 document.getElementById("btn-map-mirror").addEventListener("click", mirrorAction);
 document.getElementById("btn-map-delete").addEventListener("click", deleteSelection);
@@ -383,6 +386,11 @@ window.addEventListener("keydown", function (ev) {
     if (key === "l") {
       ev.preventDefault();
       locatePosition();
+      return;
+    }
+    if (key === "f") {
+      ev.preventDefault();
+      setMapMode(mapUI.mode === "route" ? "place" : "route");
       return;
     }
     if (key === "r") { ev.preventDefault(); rotateAction(); return; }

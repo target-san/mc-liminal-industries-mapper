@@ -14,6 +14,7 @@ import { withUndo } from './history.js';
 import { dpr, setDpr, spaceHeld } from './screen.js';
 import { isAnchored, anchorOrigin, worldOfTile, tileOfWorld, setAnchor,
          roomAtTile, parseWorldXZ, formatXZ } from './world.js';
+import { findRoute, routeStillValid, routePoints, routeLength } from './route.js';
 import { ui } from './hooks.js';
 
 /* ============================================================
@@ -36,8 +37,10 @@ const mapUI = {
   selected: null,     // placement key
   hover: null,        // { gx, gy }
   hoverEdge: null,    // { gx, gy, dir } while in doors mode
-  mode: "place",      // "place" | "doors" | "anchor"
+  mode: "place",      // "place" | "doors" | "anchor" | "route"
   marker: null,       // { u, v, x, z } from the last position lookup
+  routeFrom: null,    // first room picked in route mode
+  route: null,        // { cells, edges } once both ends are picked
   drag: null,
 };
 
@@ -344,6 +347,41 @@ function drawTileMarker(u, v, color, width) {
   mctx.stroke();
 }
 
+/*
+   A dark casing under a bright line, so the route reads over any room colour
+   the palette happens to hold.
+*/
+function drawRoute() {
+  if (mapUI.route && !routeStillValid(mapUI.route)) {
+    mapUI.route = null;   // a room or wall along it changed
+  }
+  if (!mapUI.route) return;
+
+  const pts = routePoints(mapUI.route);
+  if (pts.length < 2) return;
+  const s = mapUI.view.scale;
+
+  mctx.lineJoin = "round";
+  mctx.lineCap = "round";
+  [[Math.max(5, s * 2.4), "rgba(0,0,0,0.55)"],
+   [Math.max(2.5, s * 1.1), "#57d08a"]].forEach(function (pass) {
+    mctx.lineWidth = pass[0];
+    mctx.strokeStyle = pass[1];
+    mctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const x = mapUI.view.ox + pts[i].u * s;
+      const y = mapUI.view.oy + pts[i].v * s;
+      if (i === 0) mctx.moveTo(x, y);
+      else mctx.lineTo(x, y);
+    }
+    mctx.stroke();
+  });
+
+  drawTileMarker(pts[0].u - 0.5, pts[0].v - 0.5, "#57d08a", 2.5);
+  const last = pts[pts.length - 1];
+  drawTileMarker(last.u - 0.5, last.v - 0.5, "#57d08a", 2.5);
+}
+
 function drawMarkers() {
   const o = anchorOrigin();
   if (o) drawTileMarker(o.u, o.v, "rgba(122,162,247,0.9)", 1.5);
@@ -422,6 +460,7 @@ function drawMap() {
     mctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
+  drawRoute();
   drawMarkers();
 
   /* Selection. */
@@ -501,6 +540,10 @@ async function locatePosition() {
 function setMapMode(mode) {
   mapUI.mode = mode;
   if (mode !== "place") mapUI.selected = null;
+  if (mode !== "route") {
+    mapUI.routeFrom = null;
+    mapUI.route = null;
+  }
   mapUI.hoverEdge = null;
   updateMapBar();
   updateMapFoot();
@@ -617,6 +660,24 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
     return;
   }
   if (ev.button !== 0) return;
+
+  if (mapUI.mode === "route") {
+    const cell = mapCellAt(p.x, p.y);
+    const key = placementKey(cell.gx, cell.gy);
+    if (!state.map.placements[key]) return;
+    if (!mapUI.routeFrom || mapUI.route) {
+      /* First pick, or starting over after a finished route. */
+      mapUI.routeFrom = key;
+      mapUI.route = null;
+    } else {
+      mapUI.route = findRoute(mapUI.routeFrom, key);
+      if (!mapUI.route) mapUI.routeFrom = key;   // unreachable: treat as a new start
+    }
+    updateMapBar();
+    updateMapFoot();
+    drawMap();
+    return;
+  }
 
   if (mapUI.mode === "anchor") {
     const cell = mapCellAt(p.x, p.y);
@@ -764,6 +825,19 @@ function updateMapBar() {
   if (btnDoors) btnDoors.classList.toggle("on", doors);
   const btnAnchor = document.getElementById("btn-map-anchor");
   if (btnAnchor) btnAnchor.classList.toggle("on", mapUI.mode === "anchor");
+  const btnRoute = document.getElementById("btn-map-route");
+  if (btnRoute) btnRoute.classList.toggle("on", mapUI.mode === "route");
+
+  if (mapUI.mode === "route") {
+    mapBrushEl.textContent = "route";
+    mapOrientEl.textContent = mapUI.route
+      ? mapUI.route.cells.length + " rooms, about " + routeLength(mapUI.route) + " blocks"
+      : mapUI.routeFrom
+        ? "now click where you want to get to"
+        : "click the room you are starting from";
+    document.getElementById("btn-map-delete").disabled = true;
+    return;
+  }
 
   if (mapUI.mode === "anchor") {
     mapBrushEl.textContent = "anchor";
@@ -793,6 +867,21 @@ function updateMapBar() {
 }
 
 function updateMapFoot() {
+  if (mapUI.mode === "route") {
+    if (mapUI.route) {
+      mapPosEl.textContent = mapUI.route.cells.join("  >  ");
+      mapCellEl.textContent = "";
+    } else if (mapUI.routeFrom) {
+      mapPosEl.textContent = "from " + mapUI.routeFrom;
+      mapCellEl.textContent = "pick a destination room";
+    } else {
+      mapPosEl.textContent = "route";
+      mapCellEl.textContent = "pick two rooms";
+    }
+    mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
+    return;
+  }
+
   if (mapUI.mode === "doors") {
     const e = mapUI.hoverEdge;
     if (e) {
@@ -874,6 +963,7 @@ export {
   edgeAt,
   askAnchor,
   locatePosition,
+  drawRoute,
   centreOnTile,
   applyMapView,
   rememberMapView,
