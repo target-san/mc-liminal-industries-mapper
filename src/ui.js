@@ -18,6 +18,7 @@ import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapSidebar, nameSelectedRoom, bookmarkSelectedRoom,
          locatePosition, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
+import { sectionsOf, setExitGroup, clearExitGroups } from './sections.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
 import { setSpaceHeld } from './screen.js';
 import { askText, askConfirm, showError } from './dialog.js';
@@ -244,6 +245,80 @@ function renderPaletteEditor() {
 
 
 
+const SIDE_NAMES = { N: "North", E: "East", S: "South", W: "West" };
+const GROUP_LETTERS = "ABCDEFGH";
+
+/*
+   One row per doorway, showing which group it belongs to. Clicking a group
+   cycles it, including onto a group of its own -- which is how a room whose
+   plan view cannot show its own disjointness gets told the truth.
+*/
+function renderExitGroups() {
+  const box = document.getElementById("exit-groups");
+  box.textContent = "";
+
+  const t = currentTemplate();
+  if (!t) return;
+
+  const info = sectionsOf(t);
+  if (!info.runs.length) {
+    const note = document.createElement("div");
+    note.className = "exit-note";
+    note.textContent = "This room has no doorways.";
+    box.appendChild(note);
+    return;
+  }
+
+  const perSide = {};
+  info.runs.forEach(function (run) {
+    perSide[run.side] = (perSide[run.side] || 0) + 1;
+  });
+  const usedOnSide = {};
+
+  info.runs.forEach(function (run, i) {
+    usedOnSide[run.side] = (usedOnSide[run.side] || 0) + 1;
+
+    const row = document.createElement("div");
+    row.className = "exit-row";
+
+    const name = document.createElement("span");
+    name.textContent = SIDE_NAMES[run.side] +
+      (perSide[run.side] > 1 ? " " + usedOnSide[run.side] : "") +
+      "  (" + run.tiles.length + " tiles)";
+    row.appendChild(name);
+
+    const btn = document.createElement("button");
+    btn.className = "group-btn g" + (run.group % 4);
+    btn.textContent = GROUP_LETTERS[run.group] || String(run.group);
+    btn.title = "Which part of the room this doorway opens into. " +
+                "Click to move it to another group.";
+    btn.addEventListener("click", function () {
+      /* One past the current count, so a doorway can always be split off. */
+      setExitGroup(t, i, (run.group + 1) % (info.count + 1));
+    });
+    row.appendChild(btn);
+
+    box.appendChild(row);
+  });
+
+  const note = document.createElement("div");
+  note.className = "exit-note";
+  note.textContent = info.count === 1
+    ? "All doorways connect to each other."
+    : info.count + " separate parts; routes never cross between them.";
+  box.appendChild(note);
+
+  if (info.manual) {
+    const reset = document.createElement("button");
+    reset.style.width = "100%";
+    reset.style.marginTop = "6px";
+    reset.textContent = "Back to automatic";
+    reset.title = "Work the groups out from the painting again";
+    reset.addEventListener("click", function () { clearExitGroups(t); });
+    box.appendChild(reset);
+  }
+}
+
 function refreshStats() {
   const o = isAnchored() ? anchorOrigin() : null;
   mapInfoEl.textContent =
@@ -255,6 +330,7 @@ function refreshStats() {
 function refreshAll() {
   renderTemplateList();
   renderPalette();
+  renderExitGroups();
   renderEditorHeader();
   renderMapSidebar();
   updateMapBar();

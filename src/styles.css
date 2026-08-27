@@ -377,3 +377,32 @@ button.on {
 .modal-buttons .primary:hover { background: #3d5e8e; }
 .modal-buttons .primary.danger { background: #6b3a3a; border-color: #8a4a4a; color: #f0dede; }
 .modal-buttons .primary.danger:hover { background: #7d4444; }
+
+/* ---------- Exit groups ---------- */
+#exit-groups { padding: 6px; }
+
+.exit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.exit-row span { flex: 1 1 auto; color: #9aa3b2; font-size: 12px; }
+
+.group-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  padding: 1px 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.group-btn.g0 { background: #33507a; border-color: #4a6fa5; color: #eaf0f8; }
+.group-btn.g1 { background: #3f6b4a; border-color: #548a63; color: #e6f2e9; }
+.group-btn.g2 { background: #7a5a33; border-color: #a5804a; color: #f8f0ea; }
+.group-btn.g3 { background: #6b3f63; border-color: #8a5480; color: #f2e6f0; }
+
+.exit-note {
+  padding: 6px 0 0;
+  color: #6d7684;
+  font-size: 11px;
+}

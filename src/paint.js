@@ -5,7 +5,7 @@
 
 import { ROOM_SIZE, ROOM_MAX, CELL_COUNT, cellIndex } from './geometry.js';
 import { canPaint, defaultSlotAt } from './palette.js';
-import { state, templateBitmaps } from './store.js';
+import { state, forgetTemplate } from './store.js';
 import { recordCell } from './history.js';
 
 /* ---------- Painting ---------- */
@@ -16,7 +16,7 @@ function paintCell(t, r, c, slot) {
   const i = cellIndex(r, c);
   if (t.cells[i] === slot) return false;
   recordCell(i, t.cells[i]);
-  templateBitmaps.delete(t.id);   // invalidate at the write, not at the call site
+  forgetTemplate(t.id);   // invalidate at the write, not at the call site
   t.cells[i] = slot;
   return true;
 }
@@ -66,7 +66,7 @@ function floodFill(t, r0, c0, slot) {
   const seen = new Uint8Array(CELL_COUNT);
   const stack = [r0 * ROOM_SIZE + c0];
   let changed = false;
-  templateBitmaps.delete(t.id);
+  forgetTemplate(t.id);
 
   while (stack.length) {
     const i = stack.pop();

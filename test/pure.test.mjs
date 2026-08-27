@@ -13,6 +13,7 @@ import * as edges from '../src/edges.js';
 import * as storage from '../src/storage.js';
 import * as world from '../src/world.js';
 import * as route from '../src/route.js';
+import * as sections from '../src/sections.js';
 import * as rooms from '../src/rooms.js';
 import { ui as hooks } from '../src/hooks.js';
 import { flatten, checker } from './util.mjs';
@@ -34,7 +35,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 
-const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world, route, rooms });
+const T = flatten({ geometry, palette, doc, store, history, paint, ops, edges, storage, world, route, rooms, sections });
 const { ok, totals } = checker('pure');
 
 /* ---- geometry: the transform pair ---- */
@@ -411,8 +412,9 @@ const open = (gx, gy, dir) => T.state.map.openEdges.add(T.edgeKey(gx, gy, dir));
 put(0, 0); put(1, 0); put(2, 0);
 
 ok('with every wall shut there is no route', T.findRoute('0,0', '2,0') === null);
+const self = T.findRoute('0,0', '0,0');
 ok('a room routes to itself in one step',
-   JSON.stringify(T.findRoute('0,0', '0,0')) === '{"cells":["0,0"],"edges":[]}');
+   self.cells.join() === '0,0' && self.edges.length === 0);
 ok('a room that is not placed has no route', T.findRoute('0,0', '9,9') === null);
 
 open(0, 0, 'V');
@@ -440,7 +442,7 @@ ok('the walk is roughly two room pitches long',
 
 /* neighbours honour the walls */
 ok('a shut wall is not a neighbour',
-   T.neighbours(2, 0).map((n) => n.key).join('|') === '1,0');
+   T.nodeNeighbours('2,0', 0).map((n) => n.node).join('|') === '1,0#0');
 
 /* breadth first must return the fewest rooms, not merely some route */
 put(0, 1); put(1, 1); put(2, 1);
@@ -483,31 +485,104 @@ open(0, 0, 'V');
 ok('a wall with no shared doorway is not walkable even when marked open',
    T.findRoute('0,0', '1,0') === null);
 
-/* ---- do a room's own doorways reach each other? ---- */
+/* ---- exit groups: which doorways reach each other ---- */
 const plain = T.createTemplate('plain');
-const plainCheck = T.templateExitsConnected(plain);
-ok('a default room connects all four doorways',
-   plainCheck.ok && plainCheck.exits === 20 && plainCheck.reached === 20,
-   JSON.stringify(plainCheck));
+const plainInfo = T.sectionsOf(plain);
+ok('a default room has four doorways', plainInfo.runs.length === 4, String(plainInfo.runs.length));
+ok('walked north, east, south, west',
+   plainInfo.runs.map((r) => r.side).join('') === 'NESW');
+ok('each doorway is five tiles wide',
+   plainInfo.runs.every((r) => r.tiles.length === 5));
+ok('and they all connect, so one group',
+   plainInfo.count === 1 && !plainInfo.manual);
 
 const split = T.createTemplate('split');
 for (let i = 21; i <= 25; i++) {
-  split.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;          // leave only top and bottom doors
+  split.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;          // leave only north and south
   split.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
 }
 for (let c = 1; c <= 45; c++) split.cells[T.cellIndex(23, c)] = T.SLOT_VOID;
-const splitCheck = T.templateExitsConnected(split);
-ok('a room cut in half reports its doorways as disconnected',
-   !splitCheck.ok && splitCheck.exits === 10 && splitCheck.reached === 5,
-   JSON.stringify(splitCheck));
+const splitInfo = T.sectionsOf(split);
+ok('a room cut in half has two doorways in two groups',
+   splitInfo.runs.length === 2 && splitInfo.count === 2, JSON.stringify(splitInfo.groups));
 
-const oneDoor = T.createTemplate('one');
-for (let i = 21; i <= 25; i++) {
-  oneDoor.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;
-  oneDoor.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
-  oneDoor.cells[T.cellIndex(T.ROOM_MAX, i)] = T.SLOT_WALL;
-}
-ok('a room with one doorway is trivially fine', T.templateExitsConnected(oneDoor).ok);
+const walledOff = T.createTemplate('walledOff');
+for (let c = 1; c <= 45; c++) walledOff.cells[T.cellIndex(1, c)] = T.SLOT_VOID;  // brick behind north
+const sealedInfo = T.sectionsOf(walledOff);
+ok('a doorway walled off from inside gets a group to itself',
+   sealedInfo.count === 2 && sealedInfo.groups[0] !== sealedInfo.groups[1],
+   JSON.stringify(sealedInfo.groups));
+
+/* the derivation is cached, so it must die when the painting changes */
+const cacheT = T.createTemplate('cache');
+T.state.templates.push(cacheT);
+const cacheId = cacheT.id;
+const cached = () => T.state.templates.find((x) => x.id === cacheId);
+ok('starts as one group', T.sectionsOf(cached()).count === 1);
+T.beginStroke(cached());
+for (let c = 1; c <= 45; c++) T.paintCell(cached(), 1, c, T.SLOT_VOID);
+T.endStroke();
+ok('repainting a room re-derives its exit groups',
+   T.sectionsOf(cached()).count === 2, String(T.sectionsOf(cached()).count));
+
+/* ---- the manual override, for rooms a flat plan cannot express ---- */
+const overT = T.createTemplate('over');
+T.state.templates.push(overT);
+const overId = overT.id;
+const over = () => T.state.templates.find((x) => x.id === overId);
+
+ok('it starts derived', T.sectionsOf(over()).count === 1 && !T.sectionsOf(over()).manual);
+T.setExitGroup(over(), 1, 1);        // east doorway into a group of its own
+ok('an override splits the doorways',
+   T.sectionsOf(over()).count === 2 && T.sectionsOf(over()).manual);
+T.undo();
+ok('overriding is one undo step',
+   T.sectionsOf(over()).count === 1 && !T.sectionsOf(over()).manual);
+T.redo();
+ok('and redoes', T.sectionsOf(over()).manual);
+T.clearExitGroups(over());
+ok('clearing returns to the derived grouping',
+   T.sectionsOf(over()).count === 1 && !T.sectionsOf(over()).manual);
+
+/* a grouping that no longer matches the doorways is ignored, not obeyed */
+over().exitGroups = [0, 1];
+ok('a stale override falls back to the derivation',
+   T.sectionsOf(over()).count === 1 && !T.sectionsOf(over()).manual);
+delete over().exitGroups;
+
+/* ---- routing must not cross between groups ----
+   The corridor-over-hall room: north and south connect, east and west
+   connect, and the two pairs never meet. No flat painting can say that, so
+   the grouping is set by hand. */
+T.setState(T.createDocument());
+const plainT = T.createTemplate('plain');
+const oddT = T.createTemplate('odd');
+oddT.exitGroups = [0, 1, 0, 1];      // N and S together, E and W together
+T.state.templates.push(plainT, oddT);
+
+const at = (gx, gy, id) => {
+  T.state.map.placements[T.placementKey(gx, gy)] = { templateId: id, rot: 0, mir: false };
+};
+at(1, 1, oddT.id);
+at(1, 0, plainT.id); at(1, 2, plainT.id);   // north and south of it
+at(0, 1, plainT.id); at(2, 1, plainT.id);   // west and east of it
+['V:0,1', 'V:1,1', 'H:1,0', 'H:1,1'].forEach((k) => T.state.map.openEdges.add(k));
+
+ok('the odd room really does have two groups', T.sectionsOf(oddT).count === 2);
+const through = T.findRoute('1,0', '1,2');
+ok('north to south passes through it',
+   through && through.cells.join('|') === '1,0|1,1|1,2', through && through.cells.join('|'));
+ok('west to east passes through it too',
+   (T.findRoute('0,1', '2,1') || {}).cells?.join('|') === '0,1|1,1|2,1');
+ok('but north to east cannot cut across inside it',
+   T.findRoute('1,0', '2,1') === null);
+ok('nor west to south', T.findRoute('0,1', '1,2') === null);
+
+/* with the grouping removed the same layout routes straight through */
+delete oddT.exitGroups;
+T.forgetAllTemplates();
+ok('without the override the corner route opens up',
+   (T.findRoute('1,0', '2,1') || {}).cells?.join('|') === '1,0|1,1|2,1');
 
 /* ================= phase 5: world coordinates ================= */
 

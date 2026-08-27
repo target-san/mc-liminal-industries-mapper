@@ -10,7 +10,7 @@ import { scheduleSave } from './storage.js';
 import { beginStroke, endStroke } from './history.js';
 import { dpr, setDpr, spaceHeld } from './screen.js';
 import { paintCell, paintLine, paintRect, floodFill, slotChooser } from './paint.js';
-import { templateExitsConnected } from './route.js';
+import { sectionsOf } from './sections.js';
 import { ui } from './hooks.js';
 
 const editorName  = document.getElementById("editor-name");
@@ -433,9 +433,8 @@ function renderEditorHeader() {
   document.getElementById("btn-rename").disabled = !t;
 
   /*
-     Route finding works room to room, which assumes every doorway of a room
-     reaches every other one from the inside. Say so when a room breaks that,
-     rather than letting a route quietly claim a walk that is not walkable.
+     A room in more than one piece is legitimate, so this states a fact rather
+     than raising an alarm: routing keeps the pieces apart on its own.
   */
   const warn = document.getElementById("editor-warn");
   if (!warn) return;
@@ -443,11 +442,10 @@ function renderEditorHeader() {
     warn.textContent = "";
     return;
   }
-  const exits = templateExitsConnected(t);
-  warn.textContent = exits.ok
-    ? ""
-    : "warning: only " + exits.reached + " of " + exits.exits +
-      " doorway tiles connect to each other inside this room";
+  const info = sectionsOf(t);
+  warn.textContent = info.count > 1
+    ? info.count + " exit groups" + (info.manual ? " (set by hand)" : "")
+    : "";
 }
 
 function updateEditorFoot() {

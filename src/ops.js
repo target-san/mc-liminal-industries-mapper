@@ -30,6 +30,7 @@ function duplicateTemplate(id) {
     const src = state.templates.find(function (x) { return x.id === id; });
     if (!src) return;
     const copy = { id: uid("tpl"), name: src.name + " copy", cells: src.cells.slice() };
+    if (Array.isArray(src.exitGroups)) copy.exitGroups = src.exitGroups.slice();
     state.templates.splice(state.templates.indexOf(src) + 1, 0, copy);
     setSelectedTemplate(copy.id);
     markDirty();

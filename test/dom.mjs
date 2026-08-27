@@ -55,7 +55,7 @@ export function makeSandbox() {
     },
     console, setTimeout, clearTimeout,
     Math, JSON, Date, Object, Array, String, Number, Boolean, Error, RegExp,
-    Map, Set, Uint8Array, Int32Array, Uint8ClampedArray, Infinity, NaN,
+    Map, Set, Uint8Array, Int16Array, Int32Array, Uint8ClampedArray, Infinity, NaN,
     parseInt, parseFloat, isNaN, isFinite,
     Blob: class {}, FileReader: class {},
     URL: { createObjectURL: () => '', revokeObjectURL: noop },

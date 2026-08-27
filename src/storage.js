@@ -2,7 +2,7 @@
    Autosave to localStorage, guarded because file:// origins are unreliable.
 */
 
-import { state, templateBitmaps } from './store.js';
+import { state, forgetAllTemplates } from './store.js';
 import { serialize, deserialize } from './document.js';
 import { ui } from './hooks.js';
 
@@ -40,7 +40,7 @@ function saveNow() {
 function scheduleSave() {
   /* Any document edit can change how a template renders, so the map's
      bitmap cache is dropped here rather than at each individual call site. */
-  templateBitmaps.clear();
+  forgetAllTemplates();
   if (storageBroken) return;
   ui.setStatus("unsaved", "dirty");
   if (saveTimer !== null) clearTimeout(saveTimer);

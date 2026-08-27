@@ -16,6 +16,7 @@ export * as files from '../src/files.js';
 export * as editor from '../src/editor.js';
 export * as edges from '../src/edges.js';
 export * as world from '../src/world.js';
+export * as sections from '../src/sections.js';
 export * as route from '../src/route.js';
 export * as rooms from '../src/rooms.js';
 export * as mapview from '../src/mapview.js';

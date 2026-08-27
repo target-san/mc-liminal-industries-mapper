@@ -116,7 +116,11 @@ function serialize(doc) {
       return { id: e.id, name: e.name, color: e.color, passable: e.passable, kind: e.kind };
     }),
     templates: doc.templates.map(function (t) {
-      return { id: t.id, name: t.name, cells: encodeCells(t.cells) };
+      const out = { id: t.id, name: t.name, cells: encodeCells(t.cells) };
+      /* Only written when a room's exits were grouped by hand; otherwise the
+         grouping is derived from the painting on load. */
+      if (Array.isArray(t.exitGroups)) out.exitGroups = t.exitGroups.slice();
+      return out;
     }),
     map: {
       placements: doc.map.placements,
@@ -198,7 +202,14 @@ function deserialize(raw) {
       }
       cells[k] = mapped;
     }
-    doc.templates.push({ id: t.id, name: typeof t.name === "string" ? t.name : "Room", cells: cells });
+    const tpl = { id: t.id, name: typeof t.name === "string" ? t.name : "Room", cells: cells };
+    /* A grouping that no longer matches the doorways is ignored rather than
+       rejected: the derivation takes over and the room still loads. */
+    if (Array.isArray(t.exitGroups) &&
+        t.exitGroups.every(function (n) { return Number.isInteger(n) && n >= 0; })) {
+      tpl.exitGroups = t.exitGroups.slice();
+    }
+    doc.templates.push(tpl);
   }
 
   /* Map. */

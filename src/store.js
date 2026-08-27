@@ -18,6 +18,21 @@ let selectedTemplateId = null;
 */
 const templateBitmaps = new Map();
 
+/* templateId -> exit group analysis. Same lifetime as the bitmaps: both are
+   derived from the cells and both die when those change. */
+const sectionCache = new Map();
+
+/* One place to forget everything derived from a template. */
+function forgetTemplate(id) {
+  templateBitmaps.delete(id);
+  sectionCache.delete(id);
+}
+
+function forgetAllTemplates() {
+  templateBitmaps.clear();
+  sectionCache.clear();
+}
+
 function currentTemplate() {
   if (selectedTemplateId === null) return null;
   return state.templates.find(function (t) { return t.id === selectedTemplateId; }) || null;
@@ -48,6 +63,9 @@ export {
   selectedTemplateId,
   paletteSlot,
   templateBitmaps,
+  sectionCache,
+  forgetTemplate,
+  forgetAllTemplates,
   currentTemplate,
   setState,
   setSelectedTemplate,
