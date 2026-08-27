@@ -161,6 +161,29 @@ function renderPalette() {
   renderPaletteEditor();
 }
 
+/*
+   Browsers restore form control values on reload and on session restore, and
+   fire input/change for the restored value as though the user had typed it.
+
+   These controls are rebuilt on every render and bound to whichever palette
+   entry is selected -- floor, at every boot, since that is what paletteSlot
+   starts as. So a value restored from the last session was written straight
+   into the floor entry and then autosaved: edit the wall colour, reopen the
+   browser, and floor came back wearing it.
+
+   autocomplete="off" asks browsers not to do this; they do not all listen.
+   So the handlers additionally require evidence that the person actually
+   touched the control before anything is written.
+*/
+function userDriven(el) {
+  let touched = false;
+  const mark = function () { touched = true; };
+  el.setAttribute("autocomplete", "off");
+  el.addEventListener("pointerdown", mark);
+  el.addEventListener("keydown", mark);
+  return function () { return touched; };
+}
+
 function renderPaletteEditor() {
   palEditEl.textContent = "";
   const slot = paletteSlot;
@@ -179,7 +202,9 @@ function renderPaletteEditor() {
   const nameInput = document.createElement("input");
   nameInput.type = "text";
   nameInput.value = entry.name;
+  const nameTouched = userDriven(nameInput);
   nameInput.addEventListener("change", function () {
+    if (!nameTouched()) { nameInput.value = entry.name; return; }
     const v = nameInput.value.trim();
     if (!v || v === entry.name) { nameInput.value = entry.name; return; }
     withUndo(function () {
@@ -191,18 +216,33 @@ function renderPaletteEditor() {
 
   const colorInput = document.createElement("input");
   colorInput.type = "color";
-  colorInput.value = /^#[0-9a-f]{6}$/i.test(entry.color) ? entry.color : "#808080";
+  /*
+     A colour input can only hold #rrggbb. Anything else shows as grey, and
+     the first event would then write that grey back over a colour nobody
+     asked to change -- so the write is gated on the input actually holding a
+     value the user produced.
+  */
+  const shown = /^#[0-9a-f]{6}$/i.test(entry.color) ? entry.color.toLowerCase() : null;
+  colorInput.value = shown || "#808080";
+  const colorTouched = userDriven(colorInput);
+
   /* The picker streams "input" events while it is being dragged. One
      snapshot is taken at the start of that stream and committed on "change",
      so a colour tweak is a single undo step rather than dozens. */
   let colorBefore = null;
   colorInput.addEventListener("input", function () {
+    if (!colorTouched()) { colorInput.value = shown || "#808080"; return; }
+    const next = colorInput.value;
+    if (!/^#[0-9a-f]{6}$/i.test(next)) return;
+    if (shown === null && next === "#808080") return;   // the placeholder, not a choice
+    if (next === entry.color) return;
     if (colorBefore === null) colorBefore = snapshot();
-    entry.color = colorInput.value;
+    entry.color = next;
     drawEditor();
     scheduleSave();
   });
   colorInput.addEventListener("change", function () {
+    if (!colorTouched()) { colorInput.value = shown || "#808080"; return; }
     const before = colorBefore;
     colorBefore = null;
     if (before !== null) pushSnapshotEntry(before, snapshot());
@@ -216,7 +256,9 @@ function renderPaletteEditor() {
     walk.type = "checkbox";
     walk.checked = entry.passable;
     walk.id = "pal-passable";
+    const walkTouched = userDriven(walk);
     walk.addEventListener("change", function () {
+      if (!walkTouched()) { walk.checked = entry.passable; return; }
       withUndo(function () {
         entry.passable = walk.checked;
         markDirty();

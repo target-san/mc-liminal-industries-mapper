@@ -24,6 +24,7 @@ function makeEl(id) {
     appendChild(c) { this.children.push(c); return c; },
     remove: noop, click: noop, focus: noop,
     setPointerCapture: noop,
+    setAttribute: noop, getAttribute: () => null, removeAttribute: noop,
     showModal: noop, close: noop, returnValue: '',
     rect: { left: 0, top: 0, width: 900, height: 700 },
     getBoundingClientRect() { return this.rect; },
