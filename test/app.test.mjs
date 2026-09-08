@@ -268,18 +268,18 @@ T.mapUI.route = { cells: ['99,99'], edges: [] };
 T.drawRoute();
 ok('drawing drops a route whose rooms are gone', T.mapUI.route === null);
 
-T.setMapMode('place');
+T.setMapMode('select');
 ok('leaving route mode clears both ends',
    T.mapUI.route === null && T.mapUI.routeFrom === null);
 
 /* ================= bookmarks panel and room names ================= */
-ok('the sidebar starts on bookmarks', T.mapUI.panel === 'bookmarks');
-T.setMapPanel('templates');
-ok('Add room switches to the template palette', T.mapUI.panel === 'templates');
+ok('the map starts in select mode', T.mapUI.mode === 'select');
+T.setMapMode('place');
+ok('Add room enters place mode', T.mapUI.mode === 'place');
 
 T.mapUI.brush = brushId;
 T.placeRoom(12, 10);
-ok('placing a room returns the sidebar to bookmarks', T.mapUI.panel === 'bookmarks');
+ok('placing a room drops back to select mode', T.mapUI.mode === 'select');
 
 T.mapUI.selected = '10,10';
 T.bookmarkSelectedRoom();
@@ -347,6 +347,142 @@ ok('undo restores the room and its bookmark',
   T.showTab('rooms');
   ok('returning to the rooms tab shows the current room', rowsFor() === 2, String(rowsFor()));
   T.showTab('map');
+}
+
+/* ================= map modes ================= */
+{
+  const doc = T.__document;
+  const btn = (n) => doc.getElementById('btn-map-' + n);
+  const roomButtons = ['rotate', 'mirror', 'delete', 'name', 'bookmark'];
+  const enabled = () => roomButtons.filter((n) => !btn(n).disabled).join(',');
+  const barName = () => doc.getElementById('map-brush').textContent;
+
+  T.mapUI.view.scale = 3;
+  T.mapUI.view.ox = 0;
+  T.mapUI.view.oy = 0;
+  const pitch = T.GRID_PITCH * 3;
+  const inCell = (gx, gy) => ({ x: gx * pitch + pitch / 2, y: gy * pitch + pitch / 2 });
+
+  /* the reported bug: Doors on, then Add room, then place */
+  T.setMapMode('doors');
+  ok('doors mode disables every per-room button', enabled() === '', enabled());
+
+  T.setMapMode('place');
+  ok('Add room leaves doors mode', T.mapUI.mode === 'place');
+
+  T.mapUI.brush = brushId;
+  const before = Object.keys(T.state.map.placements).length;
+  T.MAP_MODES.place.click(inCell(20, 20));
+  ok('a click in place mode places the room even after doors was on',
+     Object.keys(T.state.map.placements).length === before + 1 &&
+     !!T.state.map.placements['20,20']);
+  ok('and drops back to select with the new room selected',
+     T.mapUI.mode === 'select' && T.mapUI.selected === '20,20');
+
+  /* button enablement follows the mode, not luck */
+  ok('select mode with a room selected enables all of them',
+     enabled() === roomButtons.join(','), enabled());
+
+  T.MAP_MODES.select.click(inCell(30, 30));   // empty cell: deselects
+  ok('clicking empty space clears the selection', T.mapUI.selected === null);
+  ok('select mode with nothing selected disables all of them', enabled() === '', enabled());
+
+  T.setMapMode('place');
+  ok('place mode enables only rotate and mirror', enabled() === 'rotate,mirror', enabled());
+
+  T.setMapMode('anchor');
+  ok('anchor mode disables every per-room button', enabled() === '', enabled());
+  T.setMapMode('route');
+  ok('route mode disables every per-room button', enabled() === '', enabled());
+
+  /* the toolbar no longer talks about a brush when nothing is being placed */
+  T.setMapMode('select');
+  ok('an idle map does not claim to be missing a brush',
+     barName() !== 'no brush' && barName() === 'map', barName());
+  T.setMapMode('place');
+  ok('place mode says what it is waiting for', barName() === 'add room', barName());
+  T.setMapMode('select');
+
+  /* modes clear up after themselves */
+  T.setMapMode('route');
+  T.mapUI.routeFrom = '10,10';
+  T.setMapMode('doors');
+  ok('leaving route mode forgets its first pick', T.mapUI.routeFrom === null);
+  T.setMapMode('place');
+  T.mapUI.brush = brushId;
+  T.setMapMode('select');
+  ok('leaving place mode puts the brush down', T.mapUI.brush === null);
+
+  T.mapUI.selected = '20,20';
+  T.setMapMode('doors');
+  ok('a mode with no use for a selection clears it', T.mapUI.selected === null);
+  T.setMapMode('select');
+}
+
+/* ---- the canvases are actually wired to the pointer ----
+   Calling a handler directly proves it works; it does not prove anything is
+   still calling it. This checks the registrations themselves, which is the
+   part that went missing. */
+{
+  const wired = (id, types) => {
+    const el = T.__document.getElementById(id);
+    return types.filter((ty) => !(el.listeners[ty] || []).length);
+  };
+  const need = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+                'pointerleave', 'wheel', 'contextmenu'];
+  ok('the map canvas is wired to every pointer event it needs',
+     wired('map-canvas', need).length === 0, wired('map-canvas', need).join(','));
+  ok('the room editor canvas is too',
+     wired('editor-canvas', need).length === 0, wired('editor-canvas', need).join(','));
+}
+
+/* ================= panning, in every mode ================= */
+{
+  const ptr = (x, y, button) => ({
+    clientX: x, clientY: y, button: button === undefined ? 0 : button,
+    pointerId: 1, preventDefault() {},
+  });
+
+  T.mapUI.view.scale = 3;
+  ['select', 'place', 'doors', 'anchor', 'route'].forEach((mode) => {
+    [1, 2].forEach((button) => {
+      T.setMapMode(mode);
+      T.mapUI.view.ox = 100;
+      T.mapUI.view.oy = 100;
+
+      T.onMapPointerDown(ptr(200, 200, button));
+      ok(`${mode}: button ${button} starts a pan`,
+         !!T.mapUI.drag && T.mapUI.drag.mode === 'pan');
+
+      T.onMapPointerMove(ptr(230, 190, button));
+      ok(`${mode}: button ${button} pans the view`,
+         T.mapUI.view.ox === 130 && T.mapUI.view.oy === 90,
+         `${T.mapUI.view.ox},${T.mapUI.view.oy}`);
+
+      T.endMapDrag();
+      ok(`${mode}: releasing ends the pan`, T.mapUI.drag === null);
+
+      /* and a move afterwards must not keep dragging the view */
+      T.onMapPointerMove(ptr(300, 300, 0));
+      ok(`${mode}: moving after release does not pan`,
+         T.mapUI.view.ox === 130 && T.mapUI.view.oy === 90);
+    });
+  });
+
+  /* a plain move updates the hover readout rather than panning */
+  T.setMapMode('select');
+  T.onMapPointerMove(ptr(3 * T.GRID_PITCH + 10, 3 * T.GRID_PITCH + 10, 0));
+  ok('a plain move tracks the hovered cell',
+     T.mapUI.hover && typeof T.mapUI.hover.gx === 'number');
+
+  /* doors mode resolves a hovered wall, other modes do not */
+  T.setMapMode('doors');
+  T.onMapPointerMove(ptr(10, 10, 0));
+  const doorsTracks = 'hoverEdge' in T.mapUI;
+  T.setMapMode('select');
+  T.onMapPointerMove(ptr(10, 10, 0));
+  ok('leaving doors mode stops resolving walls',
+     doorsTracks && T.mapUI.hoverEdge === null);
 }
 
 /* ---- the map is the default tab ---- */

@@ -14,7 +14,7 @@ import { editor, wrapEl, resizeCanvas, fitView, centerView, drawEditor, setTool,
          renderEditorHeader, updateEditorFoot, endDrag } from './editor.js';
 import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapTemplateList, updateMapBar, updateMapFoot,
-         rotateAction, mirrorAction, deleteSelection, setMapMode, setMapPanel,
+         rotateAction, mirrorAction, deleteSelection, setMapMode, toggleMapMode,
          renderMapSidebar, nameSelectedRoom, bookmarkSelectedRoom,
          locatePosition, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
@@ -435,23 +435,23 @@ document.getElementById("btn-zoom-1").addEventListener("click", function () {
 });
 
 document.getElementById("btn-map-doors").addEventListener("click", function () {
-  setMapMode(mapUI.mode === "doors" ? "place" : "doors");
+  toggleMapMode("doors");
 });
 document.getElementById("btn-map-anchor").addEventListener("click", function () {
-  setMapMode(mapUI.mode === "anchor" ? "place" : "anchor");
+  toggleMapMode("anchor");
 });
 document.getElementById("btn-map-locate").addEventListener("click", locatePosition);
 document.getElementById("btn-map-route").addEventListener("click", function () {
-  setMapMode(mapUI.mode === "route" ? "place" : "route");
+  toggleMapMode("route");
 });
 document.getElementById("btn-map-rotate").addEventListener("click", rotateAction);
 document.getElementById("btn-map-mirror").addEventListener("click", mirrorAction);
 document.getElementById("btn-map-delete").addEventListener("click", deleteSelection);
 document.getElementById("btn-map-add-room").addEventListener("click", function () {
-  setMapPanel("templates");
+  setMapMode("place");
 });
 document.getElementById("btn-map-cancel-add").addEventListener("click", function () {
-  setMapPanel("bookmarks");
+  setMapMode("select");
 });
 document.getElementById("btn-map-name").addEventListener("click", nameSelectedRoom);
 document.getElementById("btn-map-bookmark").addEventListener("click", bookmarkSelectedRoom);
@@ -515,26 +515,14 @@ window.addEventListener("keydown", function (ev) {
   const key = ev.key.toLowerCase();
 
   if (activeTab === "map") {
-    if (key === "d") {
-      ev.preventDefault();
-      setMapMode(mapUI.mode === "doors" ? "place" : "doors");
-      return;
-    }
-    if (key === "a") {
-      ev.preventDefault();
-      setMapMode(mapUI.mode === "anchor" ? "place" : "anchor");
-      return;
-    }
+    if (key === "d") { ev.preventDefault(); toggleMapMode("doors"); return; }
+    if (key === "a") { ev.preventDefault(); toggleMapMode("anchor"); return; }
     if (key === "l") {
       ev.preventDefault();
       locatePosition();
       return;
     }
-    if (key === "f") {
-      ev.preventDefault();
-      setMapMode(mapUI.mode === "route" ? "place" : "route");
-      return;
-    }
+    if (key === "f") { ev.preventDefault(); toggleMapMode("route"); return; }
     if (key === "n") { ev.preventDefault(); nameSelectedRoom(); return; }
     if (key === "b") { ev.preventDefault(); bookmarkSelectedRoom(); return; }
     if (key === "r") { ev.preventDefault(); rotateAction(); return; }
@@ -545,11 +533,11 @@ window.addEventListener("keydown", function (ev) {
       return;
     }
     if (ev.key === "Escape") {
-      if (mapUI.panel === "templates") { setMapPanel("bookmarks"); return; }
-      if (mapUI.mode !== "place") { setMapMode("place"); return; }
+      /* Escape unwinds one step at a time: out of a mode, then the located
+         position marker, then the selection. */
+      if (mapUI.mode !== "select") { setMapMode("select"); return; }
       if (mapUI.marker) { mapUI.marker = null; drawMap(); return; }
       mapUI.selected = null;
-      mapUI.brush = null;
       renderMapSidebar();
       updateMapBar();
       drawMap();

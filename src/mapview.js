@@ -39,9 +39,8 @@ const mapUI = {
   selected: null,     // placement key
   hover: null,        // { gx, gy }
   hoverEdge: null,    // { gx, gy, dir } while in doors mode
-  mode: "place",      // "place" | "doors" | "anchor" | "route"
+  mode: "select",     // see MAP_MODES; the sidebar follows from it
   marker: null,       // { u, v, x, z } from the last position lookup
-  panel: "bookmarks", // sidebar contents: "bookmarks" | "templates"
   routeFrom: null,    // first room picked in route mode
   route: null,        // { cells, edges } once both ends are picked
   drag: null,
@@ -572,17 +571,29 @@ async function locatePosition() {
   }
 }
 
-function setMapMode(mode) {
-  mapUI.mode = mode;
-  if (mode !== "place") mapUI.selected = null;
-  if (mode !== "route") {
-    mapUI.routeFrom = null;
-    mapUI.route = null;
-  }
-  mapUI.hoverEdge = null;
+/*
+   Switching modes. Each mode owns whatever transient state it introduced and
+   drops it on the way out, so this does not grow an if-statement per feature.
+   A mode that has no use for a selected room loses the selection on entry,
+   which is what keeps the toolbar's per-room buttons honest.
+*/
+function setMapMode(next) {
+  const from = MAP_MODES[mapUI.mode];
+  const to = MAP_MODES[next] || MAP_MODES.select;
+
+  if (from && from.leave) from.leave();
+  mapUI.mode = to.id;
+  if (!to.usesSelection) mapUI.selected = null;
+
+  renderMapSidebar();
   updateMapBar();
   updateMapFoot();
   drawMap();
+}
+
+/* Toggling a mode button returns to select rather than doing nothing. */
+function toggleMapMode(mode) {
+  setMapMode(mapUI.mode === mode ? "select" : mode);
 }
 
 function selectedPlacement() {
@@ -611,17 +622,19 @@ function placeRoom(gx, gy) {
       const e = parseEdgeKey(k);
       if (edgeOpenable(e.gx, e.gy, e.dir)) state.map.openEdges.add(k);
     });
-    /*
-       Placement is one shot: the brush is put down after a single room, and
-       the new room becomes the selection so Rotate, Mirror and Delete act on
-       what was just placed. Picking the template again places another.
-       This is view state, so undo does not restore the brush.
-    */
-    mapUI.brush = null;
-    mapUI.selected = key;
-    mapUI.panel = "bookmarks";
     markDirty();
   });
+
+  /*
+     Placement is one shot. The brush is consumed here rather than being left
+     to the mode's leave hook, so placing always spends it however placeRoom
+     was reached. The room just placed becomes the selection and the map drops
+     back to select mode, so Rotate, Mirror, Name and Delete act on it straight
+     away. Mode and brush are view state, so undo does not restore them.
+  */
+  mapUI.brush = null;
+  mapUI.selected = key;
+  setMapMode("select");
 }
 
 /* Rotate and Mirror act on the selected room, or set the orientation for the
@@ -685,7 +698,10 @@ function mapPointerPos(ev) {
 
 mapCanvasEl.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
 
-mapCanvasEl.addEventListener("pointerdown", function (ev) {
+/* Named rather than inline so the tests can drive them directly: these are
+   the only place the map reacts to the pointer, and a listener silently going
+   missing is not something a data-level test can see. */
+function onMapPointerDown(ev) {
   mapCanvasEl.setPointerCapture(ev.pointerId);
   const p = mapPointerPos(ev);
 
@@ -698,52 +714,11 @@ mapCanvasEl.addEventListener("pointerdown", function (ev) {
   }
   if (ev.button !== 0) return;
 
-  if (mapUI.mode === "route") {
-    const cell = mapCellAt(p.x, p.y);
-    pickRouteRoom(placementKey(cell.gx, cell.gy));
-    renderMapSidebar();
-    updateMapBar();
-    updateMapFoot();
-    drawMap();
-    return;
-  }
+  const mode = MAP_MODES[mapUI.mode] || MAP_MODES.select;
+  mode.click(p);
+}
 
-  if (mapUI.mode === "anchor") {
-    const cell = mapCellAt(p.x, p.y);
-    const tile = globalTileAt(p.x, p.y);
-    if (!state.map.placements[placementKey(cell.gx, cell.gy)]) {
-      ui.showError("No room there", "Pick a tile inside a placed room.");
-      return;
-    }
-    askAnchor(cell.gx, cell.gy,
-              tile.v - cell.gy * GRID_PITCH, tile.u - cell.gx * GRID_PITCH);
-    return;
-  }
-
-  if (mapUI.mode === "doors") {
-    const e = edgeAt(p.x, p.y);
-    if (e) toggleEdge(e.gx, e.gy, e.dir);
-    updateMapFoot();
-    drawMap();
-    return;
-  }
-
-  const cell = mapCellAt(p.x, p.y);
-  const key = placementKey(cell.gx, cell.gy);
-  if (state.map.placements[key]) {
-    mapUI.selected = key;
-    updateMapBar();
-    drawMap();
-  } else if (mapUI.brush) {
-    placeRoom(cell.gx, cell.gy);
-  } else {
-    mapUI.selected = null;
-    updateMapBar();
-    drawMap();
-  }
-});
-
-mapCanvasEl.addEventListener("pointermove", function (ev) {
+function onMapPointerMove(ev) {
   const p = mapPointerPos(ev);
   const drag = mapUI.drag;
 
@@ -762,7 +737,10 @@ mapCanvasEl.addEventListener("pointermove", function (ev) {
   mapUI.hoverEdge = mapUI.mode === "doors" ? edgeAt(p.x, p.y) : null;
   updateMapFoot();
   drawMap();
-});
+}
+
+mapCanvasEl.addEventListener("pointerdown", onMapPointerDown);
+mapCanvasEl.addEventListener("pointermove", onMapPointerMove);
 
 function endMapDrag() {
   mapUI.drag = null;
@@ -870,8 +848,14 @@ function pickRouteRoom(key) {
 */
 function goToRoom(key) {
   if (!state.map.placements[key]) return;
-  if (mapUI.mode === "route") pickRouteRoom(key);
-  else mapUI.selected = key;
+  if (mapUI.mode === "route") {
+    pickRouteRoom(key);
+  } else {
+    /* Anywhere else a bookmark means "take me to this room", so it also
+       leaves whatever transient mode was running. */
+    if (mapUI.mode !== "select") setMapMode("select");
+    mapUI.selected = key;
+  }
   const parts = key.split(",");
   centreOnTile(parseInt(parts[0], 10) * GRID_PITCH + CENTER_TILE,
                parseInt(parts[1], 10) * GRID_PITCH + CENTER_TILE);
@@ -895,16 +879,6 @@ function bookmarkSelectedRoom() {
   const key = mapUI.selected;
   if (!key || !state.map.placements[key]) return;
   toggleBookmark(key);
-}
-
-/* The sidebar shows bookmarks; the template palette is a detour taken only
-   to place a room, and placement returns from it automatically. */
-function setMapPanel(panel) {
-  mapUI.panel = panel;
-  if (panel === "bookmarks") mapUI.brush = null;
-  renderMapSidebar();
-  updateMapBar();
-  drawMap();
 }
 
 /* What a bookmark row should look active for: the selection normally, the
@@ -948,7 +922,7 @@ function renderBookmarkList() {
 }
 
 function renderMapSidebar() {
-  const templates = mapUI.panel === "templates";
+  const templates = (MAP_MODES[mapUI.mode] || MAP_MODES.select).sidebar === "templates";
   document.getElementById("map-side-title").textContent =
     templates ? "Place room" : "Bookmarks";
   document.getElementById("map-panel-bookmarks").style.display = templates ? "none" : "";
@@ -959,91 +933,37 @@ function renderMapSidebar() {
   renderMapTemplateList();
 }
 
-function updateMapBar() {
-  const sel = selectedPlacement();
-  const doors = mapUI.mode === "doors";
-  const acting = mapUI.mode === "place" && !!sel;
+/*
+   Per-room actions. Enabled only where they mean something: on the selected
+   room in select mode, and -- for Rotate and Mirror alone -- in place mode,
+   where they steer the orientation the next room will be stamped with.
+*/
+const ROOM_BUTTONS = ["rotate", "mirror", "delete", "name", "bookmark"];
 
-  /* Selection actions are only meaningful on a selected room in place mode. */
-  document.getElementById("btn-map-delete").disabled = !acting;
-  document.getElementById("btn-map-name").disabled = !acting;
-  const btnBm = document.getElementById("btn-map-bookmark");
-  btnBm.disabled = !acting;
-  btnBm.textContent = acting && isBookmarked(mapUI.selected) ? "Unbookmark" : "Bookmark";
-
-  const btnDoors = document.getElementById("btn-map-doors");
-  if (btnDoors) btnDoors.classList.toggle("on", doors);
-  const btnAnchor = document.getElementById("btn-map-anchor");
-  if (btnAnchor) btnAnchor.classList.toggle("on", mapUI.mode === "anchor");
-  const btnRoute = document.getElementById("btn-map-route");
-  if (btnRoute) btnRoute.classList.toggle("on", mapUI.mode === "route");
-
-  if (mapUI.mode === "route") {
-    mapBrushEl.textContent = "route";
-    mapOrientEl.textContent = mapUI.route
-      ? mapUI.route.cells.length + " rooms, about " + routeLength(mapUI.route) + " blocks"
-      : mapUI.routeFrom
-        ? "now click where you want to get to"
-        : "click the room you are starting from";
-    return;
-  }
-
-  if (mapUI.mode === "anchor") {
-    mapBrushEl.textContent = "anchor";
-    mapOrientEl.textContent = "click the tile whose coordinates you know";
-    return;
-  }
-  if (doors) {
-    mapBrushEl.textContent = "doors";
-    mapOrientEl.textContent = "click a wall between two rooms";
-    return;
-  }
-  if (sel) {
-    mapBrushEl.textContent = "selected: " + roomName(mapUI.selected);
-    mapOrientEl.textContent = orientationText(sel.rot, sel.mir);
-  } else if (mapUI.brush) {
-    const t = state.templates.find(function (x) { return x.id === mapUI.brush; });
-    mapBrushEl.textContent = "brush: " + (t ? t.name : "?");
-    mapOrientEl.textContent = orientationText(mapUI.rot, mapUI.mir);
-  } else {
-    mapBrushEl.textContent = "no brush";
-    mapOrientEl.textContent = "pick a room on the left to place one";
-  }
+function setButtons(enabled) {
+  ROOM_BUTTONS.forEach(function (name) {
+    const el = document.getElementById("btn-map-" + name);
+    if (el) el.disabled = enabled.indexOf(name) === -1;
+  });
 }
 
-function updateMapFoot() {
-  if (mapUI.mode === "route") {
-    if (mapUI.route) {
-      mapPosEl.textContent = mapUI.route.cells.join("  >  ");
-      mapCellEl.textContent = "";
-    } else if (mapUI.routeFrom) {
-      mapPosEl.textContent = "from " + mapUI.routeFrom;
-      mapCellEl.textContent = "pick a destination room";
-    } else {
-      mapPosEl.textContent = "route";
-      mapCellEl.textContent = "pick two rooms";
-    }
-    mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
-    return;
-  }
+function updateMapBar() {
+  const sel = selectedPlacement();
+  const mode = MAP_MODES[mapUI.mode] || MAP_MODES.select;
 
-  if (mapUI.mode === "doors") {
-    const e = mapUI.hoverEdge;
-    if (e) {
-      const tiles = sharedPassages(e.gx, e.gy, e.dir);
-      mapPosEl.textContent = "wall " + e.dir + " " + e.gx + ", " + e.gy;
-      mapCellEl.textContent = tiles.length
-        ? (isEdgeOpen(e.gx, e.gy, e.dir) ? "open" : "closed") + ", " +
-          tiles.length + " shared doorway tile(s)"
-        : "cannot open: no doorway tiles in common";
-    } else {
-      mapPosEl.textContent = "wall -, -";
-      mapCellEl.textContent = "hover a wall between two rooms";
-    }
-    mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
-    return;
-  }
+  ["doors", "anchor", "route"].forEach(function (name) {
+    const el = document.getElementById("btn-map-" + name);
+    if (el) el.classList.toggle("on", mapUI.mode === name);
+  });
+  setButtons(mode.buttons(sel));
 
+  const text = mode.bar(sel);
+  mapBrushEl.textContent = text[0];
+  mapOrientEl.textContent = text[1];
+}
+
+/* Hovered cell, what is under the cursor there, and the world position. */
+function defaultFoot() {
   const h = mapUI.hover;
   if (h) {
     mapPosEl.textContent = "cell " + h.gx + ", " + h.gy;
@@ -1057,7 +977,8 @@ function updateMapFoot() {
         const src = toTemplate(local.r, local.c, p.rot, p.mir);
         const t = state.templates.find(function (x) { return x.id === p.templateId; });
         const entry = t ? state.palette[t.cells[cellIndex(src.r, src.c)]] : null;
-        mapCellEl.textContent = (t ? t.name : "?") + "  tile " + src.r + ", " + src.c +
+        mapCellEl.textContent = roomName(placementKey(h.gx, h.gy)) +
+                                "  tile " + src.r + ", " + src.c +
                                 (entry ? "  " + entry.name : "");
       } else {
         mapCellEl.textContent = "";
@@ -1069,7 +990,7 @@ function updateMapFoot() {
     mapPosEl.textContent = "cell -, -";
     mapCellEl.textContent = "";
   }
-  /* World position under the cursor, once the map is bound. */
+
   const tile = mapUI.hoverTile;
   if (tile) {
     const w = worldOfTile(tile.u, tile.v);
@@ -1078,8 +999,154 @@ function updateMapFoot() {
                               formatXZ(w.x, w.z);
     }
   }
+}
+
+function updateMapFoot() {
+  const mode = MAP_MODES[mapUI.mode] || MAP_MODES.select;
+  if (mode.foot) mode.foot();
+  else defaultFoot();
   mapZoomEl.textContent = mapUI.view.scale.toFixed(2) + " px/tile";
 }
+
+/* ============================================================
+   Map modes
+   ------------------------------------------------------------
+   One entry per mode, each describing what the sidebar shows, which room
+   buttons are live, what a click does, and what the toolbar says. Everything
+   the map does with the pointer or the toolbar goes through this table, so a
+   mode cannot half-apply the way "add a room while Doors is on" used to.
+   ============================================================ */
+
+const MAP_MODES = {
+
+  select: {
+    id: "select",
+    sidebar: "bookmarks",
+    usesSelection: true,
+    buttons: function (sel) { return sel ? ROOM_BUTTONS : []; },
+    click: function (p) {
+      const cell = mapCellAt(p.x, p.y);
+      const key = placementKey(cell.gx, cell.gy);
+      mapUI.selected = state.map.placements[key] ? key : null;
+      renderMapSidebar();
+      updateMapBar();
+      drawMap();
+    },
+    bar: function (sel) {
+      if (sel) {
+        return ["selected: " + roomName(mapUI.selected),
+                orientationText(sel.rot, sel.mir)];
+      }
+      return ["map", "click a room to select it, or Add room to place one"];
+    },
+  },
+
+  place: {
+    id: "place",
+    sidebar: "templates",
+    usesSelection: false,
+    /* Rotate and Mirror stay live here: with nothing selected they set the
+       orientation the next room is stamped with. */
+    buttons: function () { return ["rotate", "mirror"]; },
+    leave: function () { mapUI.brush = null; },
+    click: function (p) {
+      const cell = mapCellAt(p.x, p.y);
+      placeRoom(cell.gx, cell.gy);
+    },
+    bar: function () {
+      if (!mapUI.brush) return ["add room", "pick a room on the left"];
+      const t = state.templates.find(function (x) { return x.id === mapUI.brush; });
+      return ["placing: " + (t ? t.name : "?"), orientationText(mapUI.rot, mapUI.mir)];
+    },
+  },
+
+  doors: {
+    id: "doors",
+    sidebar: "bookmarks",
+    usesSelection: false,
+    buttons: function () { return []; },
+    leave: function () { mapUI.hoverEdge = null; },
+    click: function (p) {
+      const e = edgeAt(p.x, p.y);
+      if (e) toggleEdge(e.gx, e.gy, e.dir);
+      updateMapFoot();
+      drawMap();
+    },
+    bar: function () { return ["doors", "click a wall between two rooms"]; },
+    foot: function () {
+      const e = mapUI.hoverEdge;
+      if (!e) {
+        mapPosEl.textContent = "wall -, -";
+        mapCellEl.textContent = "hover a wall between two rooms";
+        return;
+      }
+      const tiles = sharedPassages(e.gx, e.gy, e.dir);
+      mapPosEl.textContent = "wall " + e.dir + " " + e.gx + ", " + e.gy;
+      mapCellEl.textContent = tiles.length
+        ? (isEdgeOpen(e.gx, e.gy, e.dir) ? "open" : "closed") + ", " +
+          tiles.length + " shared doorway tile(s)"
+        : "cannot open: no doorway tiles in common";
+    },
+  },
+
+  anchor: {
+    id: "anchor",
+    sidebar: "bookmarks",
+    usesSelection: false,
+    buttons: function () { return []; },
+    click: function (p) {
+      const cell = mapCellAt(p.x, p.y);
+      const tile = globalTileAt(p.x, p.y);
+      if (!state.map.placements[placementKey(cell.gx, cell.gy)]) {
+        ui.showError("No room there", "Pick a tile inside a placed room.");
+        return;
+      }
+      askAnchor(cell.gx, cell.gy,
+                tile.v - cell.gy * GRID_PITCH, tile.u - cell.gx * GRID_PITCH);
+    },
+    bar: function () {
+      return ["anchor", "click the tile whose coordinates you know"];
+    },
+  },
+
+  route: {
+    id: "route",
+    sidebar: "bookmarks",
+    usesSelection: false,
+    buttons: function () { return []; },
+    leave: function () {
+      mapUI.routeFrom = null;
+      mapUI.route = null;
+    },
+    click: function (p) {
+      const cell = mapCellAt(p.x, p.y);
+      pickRouteRoom(placementKey(cell.gx, cell.gy));
+      renderMapSidebar();
+      updateMapBar();
+      updateMapFoot();
+      drawMap();
+    },
+    bar: function () {
+      return ["route", mapUI.route
+        ? mapUI.route.cells.length + " rooms, about " + routeLength(mapUI.route) + " blocks"
+        : mapUI.routeFrom
+          ? "now click where you want to get to"
+          : "click the room you are starting from"];
+    },
+    foot: function () {
+      if (mapUI.route) {
+        mapPosEl.textContent = mapUI.route.cells.join("  >  ");
+        mapCellEl.textContent = "";
+      } else if (mapUI.routeFrom) {
+        mapPosEl.textContent = "from " + mapUI.routeFrom;
+        mapCellEl.textContent = "pick a destination room";
+      } else {
+        mapPosEl.textContent = "route";
+        mapCellEl.textContent = "pick two rooms";
+      }
+    },
+  },
+};
 
 export {
   mapUI,
@@ -1104,7 +1171,10 @@ export {
   renderMapTemplateList,
   renderMapSidebar,
   renderBookmarkList,
-  setMapPanel,
+  toggleMapMode,
+  MAP_MODES,
+  onMapPointerDown,
+  onMapPointerMove,
   goToRoom,
   pickRouteRoom,
   nameSelectedRoom,

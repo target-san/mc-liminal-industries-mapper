@@ -20,7 +20,17 @@ function makeEl(id) {
   const el = {
     id, style: {}, dataset: {}, children: [],
     classList: { toggle: noop, add: noop, remove: noop, contains: () => false },
-    addEventListener: noop, removeEventListener: noop,
+    /* Recorded, not ignored: a listener that quietly stops being registered
+       is invisible to any test that calls the handler directly. */
+    listeners: {},
+    addEventListener(type, fn) {
+      (this.listeners[type] = this.listeners[type] || []).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = this.listeners[type] || [];
+      const at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    },
     appendChild(c) { this.children.push(c); return c; },
     remove: noop, click: noop, focus: noop,
     setPointerCapture: noop,
