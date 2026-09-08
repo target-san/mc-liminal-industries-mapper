@@ -63,7 +63,11 @@ function showTab(name) {
   });
   /* Canvases inside a hidden panel measure zero, so each is sized on the way
      in rather than up front. */
-  if (name === "rooms") resizeCanvas();
+  if (name === "rooms") {
+    resizeCanvas();
+    renderExitGroups();
+    renderEditorHeader();
+  }
   if (name === "map") { resizeMapCanvas(); updateMapFoot(); }
 }
 
@@ -82,6 +86,21 @@ function templateRowButton(label, title, extra, onClick) {
     onClick();
   });
   return b;
+}
+
+/*
+   Everything that depends on which template is being edited, refreshed in one
+   place. Selection used to be changed inline by the list, which meant each
+   new panel had to remember to add itself here -- the exits panel did not,
+   and went stale the moment you picked a different room.
+*/
+function selectTemplate(id) {
+  setSelectedTemplate(id);
+  renderTemplateList();
+  renderExitGroups();
+  renderEditorHeader();
+  updateEditorFoot();
+  drawEditor();
 }
 
 function renderTemplateList() {
@@ -108,12 +127,7 @@ function renderTemplateList() {
       deleteTemplate(t.id);
     }));
 
-    li.addEventListener("click", function () {
-      setSelectedTemplate(t.id);
-      renderTemplateList();
-      renderEditorHeader();
-      drawEditor();
-    });
+    li.addEventListener("click", function () { selectTemplate(t.id); });
 
     tplListEl.appendChild(li);
   });
@@ -335,8 +349,16 @@ function renderExitGroups() {
     btn.title = "Which part of the room this doorway opens into. " +
                 "Click to move it to another group.";
     btn.addEventListener("click", function () {
+      /* Resolved at click time, not at render time: if this panel is showing
+         a room that is no longer the selected one, do nothing rather than
+         quietly regroup the doorways of some other room. */
+      const live = currentTemplate();
+      if (!live || live.id !== t.id) {
+        renderExitGroups();
+        return;
+      }
       /* One past the current count, so a doorway can always be split off. */
-      setExitGroup(t, i, (run.group + 1) % (info.count + 1));
+      setExitGroup(live, i, (run.group + 1) % (info.count + 1));
     });
     row.appendChild(btn);
 
@@ -572,6 +594,8 @@ Object.assign(ui, {
 
 export {
   showTab,
+  selectTemplate,
+  renderExitGroups,
   refreshAll,
   renderPalette,
   renderTemplateList,

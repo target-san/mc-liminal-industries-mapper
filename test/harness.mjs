@@ -27,5 +27,8 @@ export async function bootApp() {
   const sandbox = makeSandbox();
   vm.createContext(sandbox);
   vm.runInContext(result.outputFiles[0].text, sandbox, { filename: 'app.bundle.js' });
-  return flatten(sandbox.__T);
+  const api = flatten(sandbox.__T);
+  /* The stub document, so tests can check that panels actually re-rendered. */
+  Object.defineProperty(api, '__document', { value: sandbox.document });
+  return api;
 }

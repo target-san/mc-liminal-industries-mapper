@@ -17,7 +17,7 @@ const ctxStub = new Proxy({
 }, { get: (t, k) => (k in t ? t[k] : undefined), set: () => true });
 
 function makeEl(id) {
-  return {
+  const el = {
     id, style: {}, dataset: {}, children: [],
     classList: { toggle: noop, add: noop, remove: noop, contains: () => false },
     addEventListener: noop, removeEventListener: noop,
@@ -29,8 +29,19 @@ function makeEl(id) {
     rect: { left: 0, top: 0, width: 900, height: 700 },
     getBoundingClientRect() { return this.rect; },
     getContext: () => ctxStub,
-    textContent: '', className: '', value: '', disabled: false,
+    className: '', value: '', disabled: false,
   };
+  /* Assigning textContent drops every child, as it does in a real DOM.
+     Without this, panels that clear themselves before re-rendering appeared
+     to accumulate rows and the tests could not see a stale render. */
+  let text = '';
+  Object.defineProperty(el, 'textContent', {
+    get: () => text,
+    set: (v) => { text = String(v); el.children.length = 0; },
+    enumerable: true,
+    configurable: true,
+  });
+  return el;
 }
 
 export function makeSandbox() {

@@ -317,6 +317,38 @@ T.undo();
 ok('undo restores the room and its bookmark',
    !!T.state.map.placements['10,10'] && T.isBookmarked('10,10'));
 
+/* ================= the exits panel tracks the selected room ================= */
+{
+  const box = T.__document.getElementById('exit-groups');
+  const rowsFor = () => box.children.filter((c) => c.className === 'exit-row').length;
+
+  /* two rooms with different numbers of doorways */
+  const fourDoors = T.createTemplate('four doors');
+  const twoDoors = T.createTemplate('two doors');
+  for (let i = 21; i <= 25; i++) {
+    twoDoors.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;          // brick up east and west
+    twoDoors.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;
+  }
+  T.state.templates.push(fourDoors, twoDoors);
+
+  T.selectTemplate(fourDoors.id);
+  ok('the exits panel shows every doorway of the selected room', rowsFor() === 4,
+     String(rowsFor()));
+
+  T.selectTemplate(twoDoors.id);
+  ok('switching room re-renders the exits panel', rowsFor() === 2, String(rowsFor()));
+
+  T.selectTemplate(fourDoors.id);
+  ok('and switching back re-renders it again', rowsFor() === 4, String(rowsFor()));
+
+  /* leaving for the map and coming back must not leave it stale */
+  T.showTab('map');
+  T.selectTemplate(twoDoors.id);
+  T.showTab('rooms');
+  ok('returning to the rooms tab shows the current room', rowsFor() === 2, String(rowsFor()));
+  T.showTab('map');
+}
+
 /* ---- the map is the default tab ---- */
 ok('the map tab is the one shown on load', T.activeTab === 'map');
 
