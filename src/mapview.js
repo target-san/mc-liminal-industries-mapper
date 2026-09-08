@@ -34,8 +34,6 @@ const MAX_MAP_SCALE = 12;
 const mapUI = {
   view: { scale: 2, ox: 0, oy: 0 },
   brush: null,        // templateId being placed
-  rot: 0,             // orientation applied to the next placement
-  mir: false,
   selected: null,     // placement key
   hover: null,        // { gx, gy }
   hoverEdge: null,    // { gx, gy, dir } while in doors mode
@@ -481,7 +479,7 @@ function drawMap() {
   const h = mapUI.mode === "place" ? mapUI.hover : null;
   if (h && mapUI.brush && !state.map.placements[placementKey(h.gx, h.gy)]) {
     blitRoom(mctx, h.gx, h.gy,
-             { templateId: mapUI.brush, rot: mapUI.rot, mir: mapUI.mir }, 0.45);
+             { templateId: mapUI.brush, rot: 0, mir: false }, 0.45);
     const rect = roomScreenRect(h.gx, h.gy);
     mctx.strokeStyle = "rgba(122,162,247,0.8)";
     mctx.lineWidth = 1;
@@ -538,11 +536,9 @@ async function askAnchor(gx, gy, r, c) {
 
 /* Finds the room containing a world position and centres the view on it. */
 async function locatePosition() {
-  if (!isAnchored()) {
-    await ui.showError("Not bound yet",
-      "Use Anchor first: pick a tile you can stand on and give its coordinates.");
-    return;
-  }
+  /* The button and its shortcut are both off until the map is bound, so
+     reaching here unbound would be a wiring fault, not a user error. */
+  if (!isAnchored()) return;
   const text = await ui.askText("Where are you?", "", "Find",
     "Paste your F3 coordinates, or type X and Z.");
   if (text === null) return;
@@ -609,7 +605,9 @@ function placeRoom(gx, gy) {
   if (!state.templates.some(function (t) { return t.id === templateId; })) return;
   withUndo(function () {
     state.map.placements[key] = {
-      templateId: templateId, rot: mapUI.rot, mir: mapUI.mir,
+      /* Rooms are always stamped unrotated; Rotate and Mirror then act on
+         the placed room, which is selected the moment it lands. */
+      templateId: templateId, rot: 0, mir: false,
     };
     /*
        Rooms that meet through matching doorways are almost always connected
@@ -641,36 +639,26 @@ function placeRoom(gx, gy) {
    next placement when nothing is selected. */
 function rotateAction() {
   const p = selectedPlacement();
-  if (p) {
-    const at = mapUI.selected.split(",");
-    withUndo(function () {
-      p.rot = (p.rot + 1) & 3;
-      /* Turning a room can slide its doorways out of line with a neighbour's,
-         and an edge with no overlap left is no longer a door. */
-      pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
-      markDirty();
-    });
-  } else {
-    mapUI.rot = (mapUI.rot + 1) & 3;
-    updateMapBar();
-    drawMap();
-  }
+  if (!p) return;
+  const at = mapUI.selected.split(",");
+  withUndo(function () {
+    p.rot = (p.rot + 1) & 3;
+    /* Turning a room can slide its doorways out of line with a neighbour's,
+       and an edge with no overlap left is no longer a door. */
+    pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
+    markDirty();
+  });
 }
 
 function mirrorAction() {
   const p = selectedPlacement();
-  if (p) {
-    const at = mapUI.selected.split(",");
-    withUndo(function () {
-      p.mir = !p.mir;
-      pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
-      markDirty();
-    });
-  } else {
-    mapUI.mir = !mapUI.mir;
-    updateMapBar();
-    drawMap();
-  }
+  if (!p) return;
+  const at = mapUI.selected.split(",");
+  withUndo(function () {
+    p.mir = !p.mir;
+    pruneEdgesAt(parseInt(at[0], 10), parseInt(at[1], 10));
+    markDirty();
+  });
 }
 
 function deleteSelection() {
@@ -934,17 +922,28 @@ function renderMapSidebar() {
 }
 
 /*
-   Per-room actions. Enabled only where they mean something: on the selected
-   room in select mode, and -- for Rotate and Mirror alone -- in place mode,
-   where they steer the orientation the next room will be stamped with.
+   Per-room actions. They act on a selected room, and only select mode has
+   one, so everywhere else they are hidden outright rather than sitting there
+   greyed: a mode that cannot use them should not show them at all.
 */
-const ROOM_BUTTONS = ["rotate", "mirror", "delete", "name", "bookmark"];
+const ROOM_BUTTONS = ["name", "bookmark", "rotate", "mirror", "delete"];
 
-function setButtons(enabled) {
+function setButtons(show, enable) {
   ROOM_BUTTONS.forEach(function (name) {
     const el = document.getElementById("btn-map-" + name);
-    if (el) el.disabled = enabled.indexOf(name) === -1;
+    if (!el) return;
+    el.style.display = show ? "" : "none";
+    el.disabled = !enable;
   });
+  const sep = document.getElementById("sep-map-rooms");
+  if (sep) sep.style.display = show ? "" : "none";
+}
+
+/* Whether the per-room actions are live, for the keyboard shortcuts. Without
+   this, hiding the buttons would only hide them: R would still rotate. */
+function mapRoomActionsLive() {
+  const mode = MAP_MODES[mapUI.mode] || MAP_MODES.select;
+  return mode.roomButtons === true && !!selectedPlacement();
 }
 
 function updateMapBar() {
@@ -955,7 +954,17 @@ function updateMapBar() {
     const el = document.getElementById("btn-map-" + name);
     if (el) el.classList.toggle("on", mapUI.mode === name);
   });
-  setButtons(mode.buttons(sel));
+
+  /* Looking up a world position means nothing until a tile has been bound. */
+  const locate = document.getElementById("btn-map-locate");
+  if (locate) {
+    locate.disabled = !isAnchored();
+    locate.title = isAnchored()
+      ? "Find a world position on the map (L)"
+      : "Bind a tile with Anchor first";
+  }
+  const showRoomButtons = mode.roomButtons === true;
+  setButtons(showRoomButtons, showRoomButtons && !!sel);
 
   const text = mode.bar(sel);
   mapBrushEl.textContent = text[0];
@@ -1023,7 +1032,7 @@ const MAP_MODES = {
     id: "select",
     sidebar: "bookmarks",
     usesSelection: true,
-    buttons: function (sel) { return sel ? ROOM_BUTTONS : []; },
+    roomButtons: true,
     click: function (p) {
       const cell = mapCellAt(p.x, p.y);
       const key = placementKey(cell.gx, cell.gy);
@@ -1045,9 +1054,7 @@ const MAP_MODES = {
     id: "place",
     sidebar: "templates",
     usesSelection: false,
-    /* Rotate and Mirror stay live here: with nothing selected they set the
-       orientation the next room is stamped with. */
-    buttons: function () { return ["rotate", "mirror"]; },
+    roomButtons: false,
     leave: function () { mapUI.brush = null; },
     click: function (p) {
       const cell = mapCellAt(p.x, p.y);
@@ -1056,7 +1063,8 @@ const MAP_MODES = {
     bar: function () {
       if (!mapUI.brush) return ["add room", "pick a room on the left"];
       const t = state.templates.find(function (x) { return x.id === mapUI.brush; });
-      return ["placing: " + (t ? t.name : "?"), orientationText(mapUI.rot, mapUI.mir)];
+      return ["add room", "placing " + (t ? t.name : "?") +
+              ": click an empty cell, then Rotate or Mirror it"];
     },
   },
 
@@ -1064,7 +1072,7 @@ const MAP_MODES = {
     id: "doors",
     sidebar: "bookmarks",
     usesSelection: false,
-    buttons: function () { return []; },
+    roomButtons: false,
     leave: function () { mapUI.hoverEdge = null; },
     click: function (p) {
       const e = edgeAt(p.x, p.y);
@@ -1093,7 +1101,7 @@ const MAP_MODES = {
     id: "anchor",
     sidebar: "bookmarks",
     usesSelection: false,
-    buttons: function () { return []; },
+    roomButtons: false,
     click: function (p) {
       const cell = mapCellAt(p.x, p.y);
       const tile = globalTileAt(p.x, p.y);
@@ -1113,7 +1121,7 @@ const MAP_MODES = {
     id: "route",
     sidebar: "bookmarks",
     usesSelection: false,
-    buttons: function () { return []; },
+    roomButtons: false,
     leave: function () {
       mapUI.routeFrom = null;
       mapUI.route = null;
@@ -1173,6 +1181,7 @@ export {
   renderBookmarkList,
   toggleMapMode,
   MAP_MODES,
+  mapRoomActionsLive,
   onMapPointerDown,
   onMapPointerMove,
   goToRoom,

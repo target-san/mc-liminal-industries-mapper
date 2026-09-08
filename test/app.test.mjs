@@ -52,8 +52,6 @@ ok('late-bound UI hooks were registered', typeof T.refreshAll === 'function');
 T.addTemplate();
 const brushId = T.state.templates[T.state.templates.length - 1].id;
 T.mapUI.brush = brushId;
-T.mapUI.rot = 0;
-T.mapUI.mir = false;
 
 const before = Object.keys(T.state.map.placements).length;
 T.placeRoom(2, -1);
@@ -87,14 +85,17 @@ T.undo();
 ok('undo restores the deleted room', !!T.state.map.placements['2,-1']);
 
 T.mapUI.selected = null;
-const rotBefore = T.mapUI.rot;
 T.rotateAction();
-ok('rotate with no selection steers the brush instead',
-   T.mapUI.rot === (rotBefore + 1) % 4 && T.state.map.placements['2,-1'].rot === 0);
+T.mirrorAction();
+ok('rotate and mirror do nothing with no room selected',
+   T.state.map.placements['2,-1'].rot === 0 && T.state.map.placements['2,-1'].mir === false);
+
 T.mapUI.brush = brushId;
 T.placeRoom(3, -1);
-ok('a new room takes the brush orientation',
-   T.state.map.placements['3,-1'].rot === T.mapUI.rot);
+ok('rooms are always placed unrotated',
+   T.state.map.placements['3,-1'].rot === 0 && T.state.map.placements['3,-1'].mir === false);
+ok('there is no brush orientation left to carry',
+   !('rot' in T.mapUI) && !('mir' in T.mapUI));
 
 /* ---- hit testing inverts placement ---- */
 T.mapUI.view.scale = 3;
@@ -145,8 +146,6 @@ ok('placements survive the round-trip',
 /* ================= phase 4: walls ================= */
 
 T.mapUI.brush = brushId;
-T.mapUI.rot = 0;
-T.mapUI.mir = false;
 T.mapUI.selected = null;
 
 T.placeRoom(10, 10);
@@ -353,8 +352,10 @@ ok('undo restores the room and its bookmark',
 {
   const doc = T.__document;
   const btn = (n) => doc.getElementById('btn-map-' + n);
-  const roomButtons = ['rotate', 'mirror', 'delete', 'name', 'bookmark'];
-  const enabled = () => roomButtons.filter((n) => !btn(n).disabled).join(',');
+  const roomButtons = ['name', 'bookmark', 'rotate', 'mirror', 'delete'];
+  const shown = () => roomButtons.filter((n) => btn(n).style.display !== 'none').join(',');
+  const enabled = () => roomButtons
+    .filter((n) => btn(n).style.display !== 'none' && !btn(n).disabled).join(',');
   const barName = () => doc.getElementById('map-brush').textContent;
 
   T.mapUI.view.scale = 3;
@@ -365,7 +366,7 @@ ok('undo restores the room and its bookmark',
 
   /* the reported bug: Doors on, then Add room, then place */
   T.setMapMode('doors');
-  ok('doors mode disables every per-room button', enabled() === '', enabled());
+  ok('doors mode hides every per-room button', shown() === '', shown());
 
   T.setMapMode('place');
   ok('Add room leaves doors mode', T.mapUI.mode === 'place');
@@ -382,18 +383,32 @@ ok('undo restores the room and its bookmark',
   /* button enablement follows the mode, not luck */
   ok('select mode with a room selected enables all of them',
      enabled() === roomButtons.join(','), enabled());
+  ok('and shows them', shown() === roomButtons.join(','), shown());
 
   T.MAP_MODES.select.click(inCell(30, 30));   // empty cell: deselects
   ok('clicking empty space clears the selection', T.mapUI.selected === null);
   ok('select mode with nothing selected disables all of them', enabled() === '', enabled());
+  ok('but still shows them', shown() === roomButtons.join(','), shown());
 
   T.setMapMode('place');
-  ok('place mode enables only rotate and mirror', enabled() === 'rotate,mirror', enabled());
-
+  ok('place mode hides them too', shown() === '', shown());
   T.setMapMode('anchor');
-  ok('anchor mode disables every per-room button', enabled() === '', enabled());
+  ok('anchor mode hides them', shown() === '', shown());
   T.setMapMode('route');
-  ok('route mode disables every per-room button', enabled() === '', enabled());
+  ok('route mode hides them', shown() === '', shown());
+
+  /* they come back, greyed, as soon as select mode returns */
+  T.setMapMode('select');
+  ok('select mode shows all five again', shown() === roomButtons.join(','), shown());
+  ok('but greyed with nothing selected', enabled() === '', enabled());
+
+  /* the shortcuts follow the buttons, or hiding them would be cosmetic */
+  ok('per-room shortcuts are dead with no selection', !T.mapRoomActionsLive());
+  T.mapUI.selected = '20,20';
+  ok('and live once a room is selected', T.mapRoomActionsLive());
+  T.setMapMode('doors');
+  ok('and dead again outside select mode', !T.mapRoomActionsLive());
+  T.setMapMode('select');
 
   /* the toolbar no longer talks about a brush when nothing is being placed */
   T.setMapMode('select');
@@ -401,6 +416,8 @@ ok('undo restores the room and its bookmark',
      barName() !== 'no brush' && barName() === 'map', barName());
   T.setMapMode('place');
   ok('place mode says what it is waiting for', barName() === 'add room', barName());
+  ok('the mode label and its hint live below the canvas, not in the toolbar',
+     !!doc.getElementById('map-brush') && !!doc.getElementById('map-orient'));
   T.setMapMode('select');
 
   /* modes clear up after themselves */
@@ -417,6 +434,29 @@ ok('undo restores the room and its bookmark',
   T.setMapMode('doors');
   ok('a mode with no use for a selection clears it', T.mapUI.selected === null);
   T.setMapMode('select');
+}
+
+/* ---- Locate is off until the map is bound ---- */
+{
+  const locate = T.__document.getElementById('btn-map-locate');
+  const savedAnchor = T.state.map.anchor;
+
+  T.state.map.anchor = null;
+  T.updateMapBar();
+  ok('Locate is disabled with no anchor', locate.disabled === true);
+  ok('and says why', /Anchor/.test(locate.title), locate.title);
+
+  /* pressing it anyway must do nothing rather than pop a dialog */
+  let asked = false;
+  const savedAsk = T.ui.askText;
+  T.ui.askText = () => { asked = true; return Promise.resolve(null); };
+  await T.locatePosition();
+  ok('and asks nothing if invoked while unbound', !asked);
+  T.ui.askText = savedAsk;
+
+  T.state.map.anchor = savedAnchor;
+  T.updateMapBar();
+  ok('Locate comes back once a tile is bound', locate.disabled === false);
 }
 
 /* ---- the canvases are actually wired to the pointer ----

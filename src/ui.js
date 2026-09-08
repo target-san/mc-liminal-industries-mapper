@@ -16,7 +16,7 @@ import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapTemplateList, updateMapBar, updateMapFoot,
          rotateAction, mirrorAction, deleteSelection, setMapMode, toggleMapMode,
          renderMapSidebar, nameSelectedRoom, bookmarkSelectedRoom,
-         locatePosition, endMapDrag } from './mapview.js';
+         locatePosition, mapRoomActionsLive, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
 import { sectionsOf, setExitGroup, clearExitGroups } from './sections.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
@@ -519,18 +519,24 @@ window.addEventListener("keydown", function (ev) {
     if (key === "a") { ev.preventDefault(); toggleMapMode("anchor"); return; }
     if (key === "l") {
       ev.preventDefault();
-      locatePosition();
+      /* Off until a tile has been bound, matching the button. */
+      if (isAnchored()) locatePosition();
       return;
     }
     if (key === "f") { ev.preventDefault(); toggleMapMode("route"); return; }
-    if (key === "n") { ev.preventDefault(); nameSelectedRoom(); return; }
-    if (key === "b") { ev.preventDefault(); bookmarkSelectedRoom(); return; }
-    if (key === "r") { ev.preventDefault(); rotateAction(); return; }
-    if (key === "m") { ev.preventDefault(); mirrorAction(); return; }
-    if (ev.key === "Delete" || ev.key === "Backspace") {
-      ev.preventDefault();
-      deleteSelection();
-      return;
+    /* The per-room shortcuts are live exactly where their buttons are. */
+    if (mapRoomActionsLive()) {
+      if (key === "n") { ev.preventDefault(); nameSelectedRoom(); return; }
+      if (key === "b") { ev.preventDefault(); bookmarkSelectedRoom(); return; }
+    }
+    if (mapRoomActionsLive()) {
+      if (key === "r") { ev.preventDefault(); rotateAction(); return; }
+      if (key === "m") { ev.preventDefault(); mirrorAction(); return; }
+      if (ev.key === "Delete" || ev.key === "Backspace") {
+        ev.preventDefault();
+        deleteSelection();
+        return;
+      }
     }
     if (ev.key === "Escape") {
       /* Escape unwinds one step at a time: out of a mode, then the located

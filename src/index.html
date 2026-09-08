@@ -121,14 +121,11 @@
 
     <div class="stage">
       <div class="bar" id="map-bar">
-        <span class="bar-name" id="map-brush">no brush</span>
-        <span class="orient" id="map-orient"></span>
-        <span class="sep"></span>
         <button id="btn-map-doors" title="Open and close walls between rooms (D)">Doors</button>
         <button id="btn-map-anchor" title="Bind a tile to world coordinates (A)">Anchor</button>
         <button id="btn-map-locate" title="Find a world position on the map (L)">Locate</button>
         <button id="btn-map-route" title="Walking route between two rooms (F)">Route</button>
-        <span class="sep"></span>
+        <span class="sep" id="sep-map-rooms"></span>
         <button id="btn-map-name" title="Name the selected room (N)">Name</button>
         <button id="btn-map-bookmark" title="Bookmark the selected room (B)">Bookmark</button>
         <button id="btn-map-rotate" title="Rotate 90 degrees clockwise (R)">Rotate</button>
@@ -140,6 +137,10 @@
       </div>
       <div class="canvas-wrap" id="map-wrap">
         <canvas id="map-canvas"></canvas>
+      </div>
+      <div class="statusline">
+        <span class="status-mode" id="map-brush"></span>
+        <span class="status-hint" id="map-orient"></span>
       </div>
       <div class="foot">
         <span id="map-pos">cell -, -</span>
