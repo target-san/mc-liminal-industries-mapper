@@ -20,6 +20,8 @@ import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          locatePosition, mapRoomActionsLive, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
 import { sectionsOf, setExitGroup, clearExitGroups } from './sections.js';
+import { ROOM_SIZE, ROOM_MAX, fromTemplate } from './geometry.js';
+import { defaultRot, defaultMir } from './document.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
 import { setSpaceHeld } from './screen.js';
 import { askText, askConfirm, showError } from './dialog.js';
@@ -303,7 +305,33 @@ function renderPaletteEditor() {
 
 
 const SIDE_NAMES = { N: "North", E: "East", S: "South", W: "West" };
+const SIDE_ORDER = { N: 0, E: 1, S: 2, W: 3 };
 const GROUP_LETTERS = "ABCDEFGH";
+
+/*
+   Which edge of the canvas a doorway appears on, once the room's placement
+   orientation has been applied. Doorways belong to the room, so they turn
+   with it -- unlike the rulers, which measure the drawing board and stay put.
+
+   Run indices stay in template order regardless: exitGroups is stored against
+   them, so only the labelling and the row order follow the display.
+*/
+function displayedRun(t, run, index) {
+  const cell = run.tiles[0];
+  const at = fromTemplate((cell / ROOM_SIZE) | 0, cell % ROOM_SIZE,
+                          defaultRot(t), defaultMir(t));
+  let side;
+  if (at.r === 0) side = "N";
+  else if (at.r === ROOM_MAX) side = "S";
+  else if (at.c === 0) side = "W";
+  else side = "E";
+  return {
+    run: run,
+    index: index,
+    side: side,
+    along: side === "N" || side === "S" ? at.c : at.r,
+  };
+}
 
 /*
    One row per doorway, showing which group it belongs to. Clicking a group
@@ -326,21 +354,26 @@ function renderExitGroups() {
     return;
   }
 
-  const perSide = {};
-  info.runs.forEach(function (run) {
-    perSide[run.side] = (perSide[run.side] || 0) + 1;
+  const rows = info.runs.map(function (run, i) { return displayedRun(t, run, i); });
+  rows.sort(function (a, b) {
+    return SIDE_ORDER[a.side] - SIDE_ORDER[b.side] || a.along - b.along;
   });
+
+  const perSide = {};
+  rows.forEach(function (d) { perSide[d.side] = (perSide[d.side] || 0) + 1; });
   const usedOnSide = {};
 
-  info.runs.forEach(function (run, i) {
-    usedOnSide[run.side] = (usedOnSide[run.side] || 0) + 1;
+  rows.forEach(function (d) {
+    const run = d.run;
+    const i = d.index;
+    usedOnSide[d.side] = (usedOnSide[d.side] || 0) + 1;
 
     const row = document.createElement("div");
     row.className = "exit-row";
 
     const name = document.createElement("span");
-    name.textContent = SIDE_NAMES[run.side] +
-      (perSide[run.side] > 1 ? " " + usedOnSide[run.side] : "") +
+    name.textContent = SIDE_NAMES[d.side] +
+      (perSide[d.side] > 1 ? " " + usedOnSide[d.side] : "") +
       "  (" + run.tiles.length + " tiles)";
     row.appendChild(name);
 

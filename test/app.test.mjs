@@ -436,6 +436,125 @@ ok('undo restores the room and its bookmark',
   T.setMapMode('select');
 }
 
+/* ---- the exits panel names doorways by where they are drawn ---- */
+{
+  const box = T.__document.getElementById('exit-groups');
+  const labels = () => box.children
+    .filter((c) => c.className === 'exit-row')
+    .map((row) => row.children[0].textContent.split('  ')[0]);
+
+  const exitT = T.createTemplate('exits');
+  T.state.templates.push(exitT);
+  const exitId = exitT.id;
+
+  T.selectTemplate(exitId);
+  ok('unrotated, the four doorways read north, east, south, west',
+     labels().join(',') === 'North,East,South,West', labels().join(','));
+
+  /* a quarter turn clockwise carries the top edge to the right */
+  T.rotateTemplateDefault(exitId);
+  T.renderExitGroups();
+  ok('a turned room still lists all four', labels().length === 4);
+  ok('and still in screen order', labels().join(',') === 'North,East,South,West',
+     labels().join(','));
+
+  /* with only one doorway the label has to move with the room */
+  const oneT = T.createTemplate('one exit');
+  for (let i = 21; i <= 25; i++) {
+    oneT.cells[T.cellIndex(i, 0)] = T.SLOT_WALL;             // drop west
+    oneT.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;    // drop east
+    oneT.cells[T.cellIndex(T.ROOM_MAX, i)] = T.SLOT_WALL;    // drop south
+  }
+  T.state.templates.push(oneT);
+  const oneId = oneT.id;
+  T.selectTemplate(oneId);
+  ok('the lone doorway starts in the north', labels().join(',') === 'North',
+     labels().join(','));
+
+  T.rotateTemplateDefault(oneId);
+  T.renderExitGroups();
+  ok('a quarter turn puts it on the east', labels().join(',') === 'East', labels().join(','));
+  T.rotateTemplateDefault(oneId);
+  T.renderExitGroups();
+  ok('a half turn puts it on the south', labels().join(',') === 'South', labels().join(','));
+
+  /* mirroring alone must flip east and west, and leave north alone */
+  const mirT = T.createTemplate('mirrored');
+  for (let i = 21; i <= 25; i++) {
+    mirT.cells[T.cellIndex(i, T.ROOM_MAX)] = T.SLOT_WALL;    // drop east
+    mirT.cells[T.cellIndex(0, i)] = T.SLOT_WALL;             // drop north
+    mirT.cells[T.cellIndex(T.ROOM_MAX, i)] = T.SLOT_WALL;    // drop south
+  }
+  T.state.templates.push(mirT);
+  const mirId = mirT.id;
+  T.selectTemplate(mirId);
+  ok('the lone doorway starts in the west', labels().join(',') === 'West', labels().join(','));
+  T.mirrorTemplateDefault(mirId);
+  T.renderExitGroups();
+  ok('mirroring moves it to the east', labels().join(',') === 'East', labels().join(','));
+}
+
+/* ---- the room editor paints through the displayed orientation ----
+   The canvas shows the room as it will be placed, so a click at a screen tile
+   must land on the template tile that is being displayed there -- not on the
+   tile with those coordinates. */
+{
+  const paintT = T.createTemplate('painted');
+  T.state.templates.push(paintT);
+  const paintId = paintT.id;
+  const live = () => T.state.templates.find((x) => x.id === paintId);
+
+  T.selectTemplate(paintId);
+  T.setTool('pencil');
+  T.setPaletteSlot(T.SLOT_VOID);
+  T.editor.view.scale = 10;
+  T.editor.view.ox = 0;
+  T.editor.view.oy = 0;
+  const at = (vr, vc) => ({
+    clientX: vc * 10 + 5, clientY: vr * 10 + 5,
+    button: 0, shiftKey: false, pointerId: 1, preventDefault() {},
+  });
+
+  /* unrotated: the screen tile is the template tile */
+  T.onEditorPointerDown(at(5, 7));
+  T.endDrag();
+  ok('with no orientation a click paints the tile it is over',
+     live().cells[T.cellIndex(5, 7)] === T.SLOT_VOID);
+
+  /* a quarter turn: the same screen tile must reach a different cell */
+  T.rotateTemplateDefault(paintId);
+  const turned = T.toTemplate(9, 11, T.defaultRot(live()), T.defaultMir(live()));
+  ok('the mapping actually moves the tile', turned.r !== 9 || turned.c !== 11);
+
+  T.onEditorPointerDown(at(9, 11));
+  T.endDrag();
+  ok('a turned room paints the cell shown at that spot',
+     live().cells[T.cellIndex(turned.r, turned.c)] === T.SLOT_VOID,
+     `${turned.r},${turned.c}`);
+  ok('and not the cell with those screen coordinates',
+     live().cells[T.cellIndex(9, 11)] !== T.SLOT_VOID);
+
+  /* mirrored as well, to catch a transform applied in the wrong order */
+  T.mirrorTemplateDefault(paintId);
+  const flipped = T.toTemplate(13, 4, T.defaultRot(live()), T.defaultMir(live()));
+  T.onEditorPointerDown(at(13, 4));
+  T.endDrag();
+  ok('a turned and flipped room maps correctly too',
+     live().cells[T.cellIndex(flipped.r, flipped.c)] === T.SLOT_VOID,
+     `${flipped.r},${flipped.c}`);
+
+  /* dragging a stroke stays on the mapped cells */
+  T.onEditorPointerDown(at(20, 20));
+  T.onEditorPointerMove(at(20, 24));
+  T.endDrag();
+  const dragged = [20, 21, 22, 23, 24].map((vc) =>
+    T.toTemplate(20, vc, T.defaultRot(live()), T.defaultMir(live())));
+  ok('a dragged stroke follows the cursor across the mapping',
+     dragged.every((cell) => live().cells[T.cellIndex(cell.r, cell.c)] === T.SLOT_VOID));
+
+  T.setPaletteSlot(T.SLOT_FLOOR);
+}
+
 /* ---- new rooms inherit the template's orientation ---- */
 {
   const tplId = T.state.templates[0].id;

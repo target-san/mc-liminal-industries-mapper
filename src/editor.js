@@ -2,7 +2,7 @@
    The room editor canvas: painting, rulers and the hover cursor.
 */
 
-import { ROOM_SIZE, ROOM_MAX, CELL_COUNT, cellIndex, isBoundary,
+import { ROOM_SIZE, ROOM_MAX, CELL_COUNT, cellIndex, isBoundary, toTemplate,
          LAMP_LINES, LAMP_STEP, CENTER_TILE } from './geometry.js';
 import { canPaint, defaultSlotAt, invertColor, SLOT_VOID } from './palette.js';
 import { state, currentTemplate, paletteSlot, setPaletteSlot } from './store.js';
@@ -99,6 +99,19 @@ function centerView() {
   editor.view.oy = (canvasH - span) / 2;
 }
 
+/*
+   The editor draws the room the way it will be placed, so a tile on screen is
+   not the tile it came from. Everything that reads or writes cells maps
+   through here first.
+
+   Rulers, the hover readout and the exits panel deliberately stay in screen
+   terms: they exist to help aim at the painting, and a ruler that spun with
+   the room would be worse than useless.
+*/
+function toCell(t, r, c) {
+  return toTemplate(r, c, defaultRot(t), defaultMir(t));
+}
+
 function tileAt(px, py) {
   const v = editor.view;
   const c = Math.floor((px - v.ox) / v.scale);
@@ -119,6 +132,8 @@ function drawEditor() {
 
   const v = editor.view;
   const s = v.scale;
+  const rot = defaultRot(t);
+  const mir = defaultMir(t);
 
   ctx.fillStyle = "#101317";
   ctx.fillRect(0, 0, canvasW, canvasH);
@@ -144,7 +159,9 @@ function drawEditor() {
       const x = colX[c];
       const w = colX[c + 1] - x;
       if (x + w < 0 || x > canvasW) continue;
-      const entry = state.palette[t.cells[cellIndex(r, c)]] || state.palette[SLOT_VOID];
+      const src = toTemplate(r, c, rot, mir);
+      const entry = state.palette[t.cells[cellIndex(src.r, src.c)]] ||
+                    state.palette[SLOT_VOID];
       ctx.fillStyle = entry.color;
       ctx.fillRect(x, y, w, h);
     }
@@ -170,7 +187,8 @@ function drawEditor() {
     ctx.fillStyle = state.palette[drag.slot].color;
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        if (!canPaint(r, c, state.palette[drag.slot])) continue;
+        const at = toTemplate(r, c, rot, mir);
+        if (!canPaint(at.r, at.c, state.palette[drag.slot])) continue;
         ctx.fillRect(colX[c], rowY[r], colX[c + 1] - colX[c], rowY[r + 1] - rowY[r]);
       }
     }
@@ -285,7 +303,8 @@ function drawHover(colX, rowY, s, t) {
   drawRulerChip(String(h.r), x0 - RULER_SIZE / 2, midY);
   drawRulerChip(String(h.c), midX, y0 - RULER_SIZE / 2);
 
-  const entry = state.palette[t.cells[cellIndex(h.r, h.c)]] || state.palette[SLOT_VOID];
+  const src = toCell(t, h.r, h.c);
+  const entry = state.palette[t.cells[cellIndex(src.r, src.c)]] || state.palette[SLOT_VOID];
   const lw = Math.max(2, Math.min(4, s * 0.22));
   ctx.strokeStyle = invertColor(entry.color);
   ctx.lineWidth = lw;
@@ -302,7 +321,8 @@ function pointerPos(ev) {
 
 canvasEl.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
 
-canvasEl.addEventListener("pointerdown", function (ev) {
+/* Named so the tests can drive them; see the map canvas for why. */
+function onEditorPointerDown(ev) {
   const t = currentTemplate();
   if (!t) return;
   canvasEl.setPointerCapture(ev.pointerId);
@@ -324,16 +344,23 @@ canvasEl.addEventListener("pointerdown", function (ev) {
   const erase = ev.shiftKey;
 
   if (editor.tool === "pick") {
-    setPaletteSlot(t.cells[cellIndex(tile.r, tile.c)]);
+    const at = toCell(t, tile.r, tile.c);
+    setPaletteSlot(t.cells[cellIndex(at.r, at.c)]);
     ui.renderPalette();
     drawEditor();
     return;
   }
 
+  /* Screen tile in, template tile out: the paint primitives only ever see
+     template coordinates, so they stay unaware of how the room is shown. */
+  const cell = toCell(t, tile.r, tile.c);
+
   if (editor.tool === "rect") {
+    /* Corners are kept in screen terms so the preview follows the cursor;
+       they are mapped when the rectangle is finally painted. */
     editor.drag = {
       mode: "rect", start: tile, current: tile,
-      erase: erase, slot: erase ? defaultSlotAt(tile.r, tile.c) : paletteSlot,
+      erase: erase, slot: erase ? defaultSlotAt(cell.r, cell.c) : paletteSlot,
     };
     drawEditor();
     return;
@@ -343,18 +370,18 @@ canvasEl.addEventListener("pointerdown", function (ev) {
   let changed;
   beginStroke(t);
   if (editor.tool === "fill") {
-    changed = floodFill(t, tile.r, tile.c, slotFor(tile.r, tile.c));
+    changed = floodFill(t, cell.r, cell.c, slotFor(cell.r, cell.c));
     editor.drag = { mode: "none" };
     endStroke();
   } else {
-    changed = paintCell(t, tile.r, tile.c, slotFor(tile.r, tile.c));
-    editor.drag = { mode: "paint", last: tile, erase: erase };
+    changed = paintCell(t, cell.r, cell.c, slotFor(cell.r, cell.c));
+    editor.drag = { mode: "paint", last: cell, erase: erase };
   }
   if (changed) scheduleSave();
   drawEditor();
-});
+}
 
-canvasEl.addEventListener("pointermove", function (ev) {
+function onEditorPointerMove(ev) {
   const t = currentTemplate();
   if (!t) return;
   const p = pointerPos(ev);
@@ -375,13 +402,20 @@ canvasEl.addEventListener("pointermove", function (ev) {
 
   if (drag && drag.mode === "paint" && tile) {
     const slotFor = slotChooser(drag.erase, paletteSlot);
-    if (paintLine(t, drag.last, tile, slotFor)) scheduleSave();
-    drag.last = tile;
+    /* The transform is a rigid motion of the grid, so a straight line drawn
+       between the mapped endpoints covers the same tiles as one drawn on
+       screen and mapped afterwards. */
+    const cell = toCell(t, tile.r, tile.c);
+    if (paintLine(t, drag.last, cell, slotFor)) scheduleSave();
+    drag.last = cell;
   } else if (drag && drag.mode === "rect" && tile) {
     drag.current = tile;
   }
   drawEditor();
-});
+}
+
+canvasEl.addEventListener("pointerdown", onEditorPointerDown);
+canvasEl.addEventListener("pointermove", onEditorPointerMove);
 
 function endDrag(ev) {
   const t = currentTemplate();
@@ -393,7 +427,8 @@ function endDrag(ev) {
   if (drag.mode === "rect" && drag.current) {
     const slotFor = slotChooser(drag.erase, paletteSlot);
     beginStroke(t);
-    if (paintRect(t, drag.start, drag.current, slotFor)) scheduleSave();
+    if (paintRect(t, toCell(t, drag.start.r, drag.start.c),
+                  toCell(t, drag.current.r, drag.current.c), slotFor)) scheduleSave();
     endStroke();
   } else if (drag.mode === "paint") {
     endStroke();
@@ -466,7 +501,8 @@ function updateEditorFoot() {
   if (h && t) {
     editorPos.textContent = "tile " + h.r + ", " + h.c +
       (isBoundary(h.r, h.c) ? " (boundary)" : "");
-    const entry = state.palette[t.cells[cellIndex(h.r, h.c)]];
+    const src = toCell(t, h.r, h.c);
+    const entry = state.palette[t.cells[cellIndex(src.r, src.c)]];
     editorCell.textContent = entry ? entry.name : "";
   } else {
     editorPos.textContent = "tile -, -";
@@ -478,6 +514,9 @@ function updateEditorFoot() {
 
 export {
   editor,
+  onEditorPointerDown,
+  onEditorPointerMove,
+  toCell,
   wrapEl,
   MIN_SCALE,
   MAX_SCALE,
