@@ -5,6 +5,7 @@
 import { ROOM_SIZE, GRID_PITCH, CENTER_TILE, CELL_COUNT, cellIndex, toTemplate,
          applyPlacementTransform, placementKey } from './geometry.js';
 import { parseHexColor, SLOT_PASSAGE, SLOT_WALL } from './palette.js';
+import { defaultRot, defaultMir } from './document.js';
 import { sharedPassages, edgeConnects, edgeOpenable, isEdgeOpen, toggleEdge,
          edgesTouching, pruneEdgesAt, eachAdjacency, edgeTile, runsOf,
          parseEdgeKey, EDGE_LO, EDGE_HI } from './edges.js';
@@ -248,6 +249,10 @@ function blitRoom(g, gx, gy, placement, alpha) {
   g.restore();
 }
 
+function brushTemplate() {
+  return state.templates.find(function (t) { return t.id === mapUI.brush; }) || null;
+}
+
 function roomScreenRect(gx, gy) {
   const s = mapUI.view.scale;
   const pitch = GRID_PITCH * s;
@@ -479,7 +484,8 @@ function drawMap() {
   const h = mapUI.mode === "place" ? mapUI.hover : null;
   if (h && mapUI.brush && !state.map.placements[placementKey(h.gx, h.gy)]) {
     blitRoom(mctx, h.gx, h.gy,
-             { templateId: mapUI.brush, rot: 0, mir: false }, 0.45);
+             { templateId: mapUI.brush,
+               rot: defaultRot(brushTemplate()), mir: defaultMir(brushTemplate()) }, 0.45);
     const rect = roomScreenRect(h.gx, h.gy);
     mctx.strokeStyle = "rgba(122,162,247,0.8)";
     mctx.lineWidth = 1;
@@ -602,12 +608,14 @@ function placeRoom(gx, gy) {
   if (!templateId) return;
   const key = placementKey(gx, gy);
   if (state.map.placements[key]) return;
-  if (!state.templates.some(function (t) { return t.id === templateId; })) return;
+  const tpl = state.templates.find(function (t) { return t.id === templateId; });
+  if (!tpl) return;
   withUndo(function () {
     state.map.placements[key] = {
-      /* Rooms are always stamped unrotated; Rotate and Mirror then act on
-         the placed room, which is selected the moment it lands. */
-      templateId: templateId, rot: 0, mir: false,
+      /* New rooms start from the template's own orientation; Rotate and
+         Mirror then act on the placed room, which is selected the moment it
+         lands. Changing a template's orientation never disturbs these. */
+      templateId: templateId, rot: defaultRot(tpl), mir: defaultMir(tpl),
     };
     /*
        Rooms that meet through matching doorways are almost always connected
@@ -793,7 +801,13 @@ function renderMapTemplateList() {
     if (bmp) {
       const g = thumb.getContext("2d");
       g.imageSmoothingEnabled = true;
-      g.drawImage(bmp, 0, 0, 30, 30);
+      /* Drawn the way it will land on the map, so the default orientation is
+         visible where it matters rather than only in the editor. */
+      g.save();
+      g.scale(30 / ROOM_SIZE, 30 / ROOM_SIZE);
+      applyPlacementTransform(g, defaultRot(t), defaultMir(t));
+      g.drawImage(bmp, 0, 0);
+      g.restore();
     }
     li.appendChild(thumb);
 

@@ -2,7 +2,7 @@
    Template and palette operations, each one an undo step.
 */
 
-import { createTemplate, uid } from './document.js';
+import { createTemplate, uid, defaultRot, defaultMir } from './document.js';
 import { state, selectedTemplateId, setSelectedTemplate,
          paletteSlot, setPaletteSlot } from './store.js';
 import { RESERVED_COUNT, MAX_PALETTE, NEW_COLORS, SLOT_FLOOR } from './palette.js';
@@ -31,6 +31,8 @@ function duplicateTemplate(id) {
     if (!src) return;
     const copy = { id: uid("tpl"), name: src.name + " copy", cells: src.cells.slice() };
     if (Array.isArray(src.exitGroups)) copy.exitGroups = src.exitGroups.slice();
+    if (defaultRot(src)) copy.defaultRot = defaultRot(src);
+    if (defaultMir(src)) copy.defaultMir = true;
     state.templates.splice(state.templates.indexOf(src) + 1, 0, copy);
     setSelectedTemplate(copy.id);
     markDirty();
@@ -59,6 +61,28 @@ async function deleteTemplate(id) {
     if (selectedTemplateId === id) {
       setSelectedTemplate(state.templates.length ? state.templates[0].id : null);
     }
+    markDirty();
+  });
+}
+
+/*
+   Turning and flipping the orientation new placements inherit. Rooms already
+   on the map keep whatever orientation they were placed with.
+*/
+function rotateTemplateDefault(id) {
+  const t = state.templates.find(function (x) { return x.id === id; });
+  if (!t) return;
+  withUndo(function () {
+    t.defaultRot = (defaultRot(t) + 1) & 3;
+    markDirty();
+  });
+}
+
+function mirrorTemplateDefault(id) {
+  const t = state.templates.find(function (x) { return x.id === id; });
+  if (!t) return;
+  withUndo(function () {
+    t.defaultMir = !defaultMir(t);
     markDirty();
   });
 }
@@ -150,6 +174,8 @@ export {
   duplicateTemplate,
   deleteTemplate,
   renameTemplate,
+  rotateTemplateDefault,
+  mirrorTemplateDefault,
   addPaletteColor,
   deletePaletteColor,
 };

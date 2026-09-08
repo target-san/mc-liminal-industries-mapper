@@ -679,6 +679,67 @@ ok('unparseable view data is rejected', T.loadMapView() === null);
 mem.delete(VIEW_KEY);
 ok('no stored view yields null', T.loadMapView() === null);
 
+/* ================= a template's default orientation ================= */
+
+T.setState(T.createDocument());
+const orientT = T.createTemplate('turned');
+T.state.templates.push(orientT);
+const orientId = orientT.id;
+const tpl0 = () => T.state.templates.find((x) => x.id === orientId);
+
+ok('a fresh template is placed plain',
+   T.defaultRot(tpl0()) === 0 && T.defaultMir(tpl0()) === false);
+
+T.rotateTemplateDefault(orientId);
+ok('turning advances a quarter', T.defaultRot(tpl0()) === 1);
+T.rotateTemplateDefault(orientId);
+T.rotateTemplateDefault(orientId);
+T.rotateTemplateDefault(orientId);
+ok('and wraps back round', T.defaultRot(tpl0()) === 0);
+
+T.mirrorTemplateDefault(orientId);
+ok('flipping toggles', T.defaultMir(tpl0()) === true);
+T.undo();
+ok('flipping is one undo step', T.defaultMir(tpl0()) === false);
+T.redo();
+
+T.rotateTemplateDefault(orientId);
+ok('the two combine', T.defaultRot(tpl0()) === 1 && T.defaultMir(tpl0()) === true);
+
+/* the painting itself is untouched -- that is the whole point */
+const plainCells = T.createTemplate('turned').cells;
+ok('turning a template does not move a single tile',
+   tpl0().cells.every((v, i) => v === plainCells[i]));
+
+/* ...and neither are rooms already on the map */
+T.state.map.placements[T.placementKey(0, 0)] =
+  { templateId: orientId, rot: 0, mir: false };
+T.rotateTemplateDefault(orientId);
+T.mirrorTemplateDefault(orientId);
+ok('a room already placed keeps the orientation it was placed with',
+   T.state.map.placements['0,0'].rot === 0 &&
+   T.state.map.placements['0,0'].mir === false);
+
+/* it survives the document format, and only when it is not the default */
+const orientDoc = T.deserialize(JSON.parse(JSON.stringify(T.serialize(T.state))));
+ok('the orientation round-trips',
+   T.defaultRot(orientDoc.templates[0]) === T.defaultRot(tpl0()) &&
+   T.defaultMir(orientDoc.templates[0]) === T.defaultMir(tpl0()));
+
+const plainDoc = T.createDocument();
+plainDoc.templates.push(T.createTemplate('plain'));
+const written = T.serialize(plainDoc).templates[0];
+ok('a plain orientation is not written out',
+   !('defaultRot' in written) && !('defaultMir' in written));
+
+/* duplicating carries it */
+T.setSelectedTemplate(orientId);
+T.duplicateTemplate(orientId);
+const copy = T.state.templates.find((x) => x.id !== orientId && x.name.endsWith('copy'));
+ok('a duplicate inherits the orientation',
+   copy && T.defaultRot(copy) === T.defaultRot(tpl0()) &&
+   T.defaultMir(copy) === T.defaultMir(tpl0()));
+
 /* ================= named rooms and bookmarks ================= */
 
 T.setState(T.createDocument());

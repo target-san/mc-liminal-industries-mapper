@@ -436,3 +436,9 @@ button.on {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.orient-label {
+  font-size: 12px;
+  color: #6d7684;
+  white-space: nowrap;
+}

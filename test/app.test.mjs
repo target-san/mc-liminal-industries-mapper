@@ -436,6 +436,40 @@ ok('undo restores the room and its bookmark',
   T.setMapMode('select');
 }
 
+/* ---- new rooms inherit the template's orientation ---- */
+{
+  const tplId = T.state.templates[0].id;
+  const tpl = () => T.state.templates.find((x) => x.id === tplId);
+
+  T.rotateTemplateDefault(tplId);
+  T.mirrorTemplateDefault(tplId);
+  const wantRot = T.defaultRot(tpl());
+  const wantMir = T.defaultMir(tpl());
+
+  T.setMapMode('place');
+  T.mapUI.brush = tplId;
+  T.placeRoom(40, 40);
+  ok('a placed room takes the template orientation',
+     T.state.map.placements['40,40'].rot === wantRot &&
+     T.state.map.placements['40,40'].mir === wantMir,
+     JSON.stringify(T.state.map.placements['40,40']));
+
+  /* turning the template afterwards must not disturb it */
+  T.rotateTemplateDefault(tplId);
+  ok('turning the template later leaves the placed room alone',
+     T.state.map.placements['40,40'].rot === wantRot &&
+     T.state.map.placements['40,40'].mir === wantMir);
+
+  /* the editor bar reports it */
+  T.selectTemplate(tplId);
+  const orient = T.__document.getElementById('editor-orient').textContent;
+  ok('the room editor states the orientation',
+     orient === (T.defaultRot(tpl()) * 90) + ' deg' +
+                (T.defaultMir(tpl()) ? ', mirrored' : ''), orient);
+
+  T.setMapMode('select');
+}
+
 /* ---- Locate is off until the map is bound ---- */
 {
   const locate = T.__document.getElementById('btn-map-locate');

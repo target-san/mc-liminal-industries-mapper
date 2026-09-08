@@ -45,6 +45,20 @@ function createTemplate(name) {
   return { id: uid("tpl"), name: name, cells: cells };
 }
 
+/*
+   The orientation a template is stamped with when it is placed. It is a
+   property of the template, not a transform of its cells: rotating the grid
+   itself would silently turn every room already on the map, whereas this only
+   seeds new placements and leaves existing ones exactly as they were.
+*/
+function defaultRot(t) {
+  return t ? (t.defaultRot | 0) & 3 : 0;
+}
+
+function defaultMir(t) {
+  return !!(t && t.defaultMir === true);
+}
+
 function createDocument() {
   return {
     palette: defaultPalette(),
@@ -117,6 +131,9 @@ function serialize(doc) {
     }),
     templates: doc.templates.map(function (t) {
       const out = { id: t.id, name: t.name, cells: encodeCells(t.cells) };
+      /* Only written when it is not the plain orientation. */
+      if (defaultRot(t)) out.defaultRot = defaultRot(t);
+      if (defaultMir(t)) out.defaultMir = true;
       /* Only written when a room's exits were grouped by hand; otherwise the
          grouping is derived from the painting on load. */
       if (Array.isArray(t.exitGroups)) out.exitGroups = t.exitGroups.slice();
@@ -203,6 +220,8 @@ function deserialize(raw) {
       cells[k] = mapped;
     }
     const tpl = { id: t.id, name: typeof t.name === "string" ? t.name : "Room", cells: cells };
+    if (defaultRot(t)) tpl.defaultRot = defaultRot(t);
+    if (defaultMir(t)) tpl.defaultMir = true;
     /* A grouping that no longer matches the doorways is ignored rather than
        rejected: the derivation takes over and the room still loads. */
     if (Array.isArray(t.exitGroups) &&
@@ -267,6 +286,8 @@ export {
   uid,
   createTemplate,
   createDocument,
+  defaultRot,
+  defaultMir,
   encodeCells,
   decodeCells,
   serialize,

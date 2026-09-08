@@ -11,6 +11,7 @@ import { beginStroke, endStroke } from './history.js';
 import { dpr, setDpr, spaceHeld } from './screen.js';
 import { paintCell, paintLine, paintRect, floodFill, slotChooser } from './paint.js';
 import { sectionsOf } from './sections.js';
+import { defaultRot, defaultMir } from './document.js';
 import { ui } from './hooks.js';
 
 const editorName  = document.getElementById("editor-name");
@@ -431,6 +432,17 @@ function renderEditorHeader() {
   const t = currentTemplate();
   editorName.textContent = t ? t.name : "-";
   document.getElementById("btn-rename").disabled = !t;
+
+  /* The orientation new placements of this room start from. The painting
+     itself is never turned, so rooms already on the map are unaffected. */
+  const orient = document.getElementById("editor-orient");
+  if (orient) {
+    orient.textContent = t
+      ? (defaultRot(t) * 90) + " deg" + (defaultMir(t) ? ", mirrored" : "")
+      : "-";
+  }
+  document.getElementById("btn-tpl-rotate").disabled = !t;
+  document.getElementById("btn-tpl-mirror").disabled = !t;
 
   /*
      A room in more than one piece is legitimate, so this states a fact rather

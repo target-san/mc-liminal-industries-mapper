@@ -9,7 +9,8 @@ import { state, currentTemplate, selectedTemplateId, setSelectedTemplate,
 import { scheduleSave, markDirty, flushSave } from './storage.js';
 import { undo, redo, undoHistory, withUndo, snapshot, pushSnapshotEntry } from './history.js';
 import { addTemplate, duplicateTemplate, deleteTemplate, renameTemplate,
-         addPaletteColor, deletePaletteColor } from './ops.js';
+         addPaletteColor, deletePaletteColor,
+         rotateTemplateDefault, mirrorTemplateDefault } from './ops.js';
 import { editor, wrapEl, resizeCanvas, fitView, centerView, drawEditor, setTool,
          renderEditorHeader, updateEditorFoot, endDrag } from './editor.js';
 import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
@@ -419,6 +420,12 @@ document.getElementById("btn-new-template").addEventListener("click", addTemplat
 document.getElementById("btn-add-color").addEventListener("click", addPaletteColor);
 document.getElementById("btn-rename").addEventListener("click", function () {
   if (selectedTemplateId) renameTemplate(selectedTemplateId);
+});
+document.getElementById("btn-tpl-rotate").addEventListener("click", function () {
+  if (selectedTemplateId) rotateTemplateDefault(selectedTemplateId);
+});
+document.getElementById("btn-tpl-mirror").addEventListener("click", function () {
+  if (selectedTemplateId) mirrorTemplateDefault(selectedTemplateId);
 });
 document.getElementById("btn-undo").addEventListener("click", undo);
 document.getElementById("btn-redo").addEventListener("click", redo);
