@@ -119,7 +119,16 @@ function derivedGroups(t, runs) {
   return groups;
 }
 
-/* Renumbers arbitrary group ids into a dense 0..n-1 in run order. */
+/*
+   How many groups a room can divide its doorways into. One per side is enough
+   for the rooms this models, and a fixed set means every group is a button
+   the person can aim at rather than a number that has to be cycled to.
+*/
+const GROUP_COUNT = 4;
+
+/* Renumbers arbitrary group ids into a dense 0..n-1 in run order. Used only
+   for the derived grouping, whose component ids are arbitrary; a grouping set
+   by hand is stored and shown exactly as it was set. */
 function densify(ids) {
   const seen = new Map();
   return ids.map(function (id) {
@@ -139,8 +148,12 @@ function sectionsOf(t) {
   const runs = templateRuns(t);
   const manual = Array.isArray(t.exitGroups) &&
                  t.exitGroups.length === runs.length &&
-                 t.exitGroups.every(function (n) { return Number.isInteger(n) && n >= 0; });
-  const groups = densify(manual ? t.exitGroups : derivedGroups(t, runs));
+                 t.exitGroups.every(function (n) {
+                   return Number.isInteger(n) && n >= 0 && n < GROUP_COUNT;
+                 });
+  /* A hand-set grouping is taken literally: group 2 stays group 2, even if
+     nothing is in group 1. Only the derived one gets renumbered. */
+  const groups = manual ? t.exitGroups.slice() : densify(derivedGroups(t, runs));
 
   const tileGroup = new Map();
   runs.forEach(function (run, i) {
@@ -148,26 +161,33 @@ function sectionsOf(t) {
     run.tiles.forEach(function (cell) { tileGroup.set(cell, groups[i]); });
   });
 
-  /* A point inside the room for each group, for drawing routes through it. */
-  const sums = [];
+  /* A point inside the room for each group, for drawing routes through it.
+     Keyed by group id rather than by position, since ids can now be sparse. */
+  const sums = new Map();
   runs.forEach(function (run, i) {
     const g = groups[i];
-    if (!sums[g]) sums[g] = { r: 0, c: 0, n: 0 };
+    if (!sums.has(g)) sums.set(g, { r: 0, c: 0, n: 0 });
+    const acc = sums.get(g);
     run.inward.forEach(function (cell) {
-      sums[g].r += (cell / ROOM_SIZE) | 0;
-      sums[g].c += cell % ROOM_SIZE;
-      sums[g].n += 1;
+      acc.r += (cell / ROOM_SIZE) | 0;
+      acc.c += cell % ROOM_SIZE;
+      acc.n += 1;
     });
   });
-  const centres = sums.map(function (s) {
-    return s && s.n ? { r: s.r / s.n, c: s.c / s.n }
-                    : { r: ROOM_MAX / 2, c: ROOM_MAX / 2 };
+  const centres = new Map();
+  sums.forEach(function (acc, g) {
+    centres.set(g, acc.n ? { r: acc.r / acc.n, c: acc.c / acc.n }
+                         : { r: ROOM_MAX / 2, c: ROOM_MAX / 2 });
   });
+
+  /* The group ids actually in use, ascending. Not 0..count-1 any more. */
+  const ids = Array.from(new Set(groups)).sort(function (a, b) { return a - b; });
 
   const info = {
     runs: runs,
     groups: groups,
-    count: centres.length,
+    ids: ids,
+    count: ids.length,
     tileGroup: tileGroup,
     centres: centres,
     manual: manual,
@@ -182,10 +202,16 @@ function groupAtCell(t, r, c) {
   return g === undefined ? -1 : g;
 }
 
-/* Writes the current grouping down so one run can then be moved. */
+/*
+   Puts one doorway in one group, exactly as asked. The rest of the grouping
+   is written down as it currently stands so the change is expressible, and
+   nothing is renumbered afterwards -- what was clicked is what is stored.
+*/
 function setExitGroup(t, runIndex, group) {
   const info = sectionsOf(t);
   if (runIndex < 0 || runIndex >= info.runs.length) return;
+  if (!Number.isInteger(group) || group < 0 || group >= GROUP_COUNT) return;
+  if (info.manual && info.groups[runIndex] === group) return;
   const next = info.groups.slice();
   next[runIndex] = group;
   withUndo(function () {
@@ -205,6 +231,7 @@ function clearExitGroups(t) {
 }
 
 export {
+  GROUP_COUNT,
   templateRuns,
   interiorComponents,
   derivedGroups,

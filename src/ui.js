@@ -19,7 +19,7 @@ import { mapUI, mapWrapEl, resizeMapCanvas, drawMap, fitMapView, fitMapCenter,
          renderMapSidebar, nameSelectedRoom, bookmarkSelectedRoom,
          locatePosition, mapRoomActionsLive, endMapDrag } from './mapview.js';
 import { isAnchored, anchorOrigin, formatXZ } from './world.js';
-import { sectionsOf, setExitGroup, clearExitGroups } from './sections.js';
+import { sectionsOf, setExitGroup, clearExitGroups, GROUP_COUNT } from './sections.js';
 import { ROOM_SIZE, ROOM_MAX, fromTemplate } from './geometry.js';
 import { defaultRot, defaultMir } from './document.js';
 import { newDocument, exportDocument, importDocument } from './files.js';
@@ -374,27 +374,30 @@ function renderExitGroups() {
     const name = document.createElement("span");
     name.textContent = SIDE_NAMES[d.side] +
       (perSide[d.side] > 1 ? " " + usedOnSide[d.side] : "") +
-      "  (" + run.tiles.length + " tiles)";
+      " (" + run.tiles.length + ")";
     row.appendChild(name);
 
-    const btn = document.createElement("button");
-    btn.className = "group-btn g" + (run.group % 4);
-    btn.textContent = GROUP_LETTERS[run.group] || String(run.group);
-    btn.title = "Which part of the room this doorway opens into. " +
-                "Click to move it to another group.";
-    btn.addEventListener("click", function () {
-      /* Resolved at click time, not at render time: if this panel is showing
-         a room that is no longer the selected one, do nothing rather than
-         quietly regroup the doorways of some other room. */
-      const live = currentTemplate();
-      if (!live || live.id !== t.id) {
-        renderExitGroups();
-        return;
-      }
-      /* One past the current count, so a doorway can always be split off. */
-      setExitGroup(live, i, (run.group + 1) % (info.count + 1));
-    });
-    row.appendChild(btn);
+    /* One button per group rather than one that cycles: every group is
+       something to aim at, and clicking it says exactly where the doorway
+       goes instead of depending on where it currently is. */
+    for (let g = 0; g < GROUP_COUNT; g++) {
+      const btn = document.createElement("button");
+      btn.className = "group-btn g" + g + (run.group === g ? " on" : "");
+      btn.textContent = GROUP_LETTERS[g];
+      btn.title = "Put this doorway in group " + GROUP_LETTERS[g];
+      btn.addEventListener("click", function () {
+        /* Resolved at click time, not at render time: if this panel is
+           showing a room that is no longer the selected one, do nothing
+           rather than quietly regroup the doorways of some other room. */
+        const live = currentTemplate();
+        if (!live || live.id !== t.id) {
+          renderExitGroups();
+          return;
+        }
+        setExitGroup(live, i, g);
+      });
+      row.appendChild(btn);
+    }
 
     box.appendChild(row);
   });

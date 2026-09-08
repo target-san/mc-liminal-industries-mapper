@@ -384,22 +384,34 @@ button.on {
 .exit-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 3px;
   padding: 2px 0;
 }
-.exit-row span { flex: 1 1 auto; color: #9aa3b2; font-size: 12px; }
+.exit-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 4px;
+  color: #9aa3b2;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .group-btn {
   flex: 0 0 auto;
-  width: 26px;
+  width: 22px;
   padding: 1px 0;
   text-align: center;
-  font-variant-numeric: tabular-nums;
+  color: #6d7684;
 }
-.group-btn.g0 { background: #33507a; border-color: #4a6fa5; color: #eaf0f8; }
-.group-btn.g1 { background: #3f6b4a; border-color: #548a63; color: #e6f2e9; }
-.group-btn.g2 { background: #7a5a33; border-color: #a5804a; color: #f8f0ea; }
-.group-btn.g3 { background: #6b3f63; border-color: #8a5480; color: #f2e6f0; }
+.group-btn:hover { color: #d5d9e0; }
+
+/* Only the group a doorway is actually in is filled in. */
+.group-btn.on.g0 { background: #33507a; border-color: #4a6fa5; color: #eaf0f8; }
+.group-btn.on.g1 { background: #3f6b4a; border-color: #548a63; color: #e6f2e9; }
+.group-btn.on.g2 { background: #7a5a33; border-color: #a5804a; color: #f8f0ea; }
+.group-btn.on.g3 { background: #6b3f63; border-color: #8a5480; color: #f2e6f0; }
 
 .exit-note {
   padding: 6px 0 0;

@@ -544,6 +544,68 @@ T.clearExitGroups(over());
 ok('clearing returns to the derived grouping',
    T.sectionsOf(over()).count === 1 && !T.sectionsOf(over()).manual);
 
+/* ---- a group is set, not cycled ---- */
+const setT = T.createTemplate('set');
+T.state.templates.push(setT);
+const setId = setT.id;
+const setL = () => T.state.templates.find((x) => x.id === setId);
+const groupsOf = () => T.sectionsOf(setL()).groups.join(',');
+
+ok('a fresh room has every doorway together', groupsOf() === '0,0,0,0');
+
+T.setExitGroup(setL(), 1, 2);
+ok('a doorway goes exactly where it was put', groupsOf() === '0,2,0,0', groupsOf());
+ok('gaps in the numbering are kept, not squeezed out',
+   T.sectionsOf(setL()).ids.join(',') === '0,2', T.sectionsOf(setL()).ids.join(','));
+ok('and the count is the number of groups in use', T.sectionsOf(setL()).count === 2);
+
+T.setExitGroup(setL(), 3, 2);
+ok('two doorways can share a group', groupsOf() === '0,2,0,2', groupsOf());
+ok('which is two groups, not three', T.sectionsOf(setL()).count === 2);
+
+/* setting the same group again is a no-op, not another undo step */
+const depthBefore = T.undoHistory.past.length;
+T.setExitGroup(setL(), 3, 2);
+ok('setting the group it is already in records nothing',
+   T.undoHistory.past.length === depthBefore && groupsOf() === '0,2,0,2');
+
+/* every button reaches its group directly, from anywhere */
+[0, 1, 2, 3].forEach((g) => {
+  T.setExitGroup(setL(), 0, g);
+  ok('group ' + g + ' is one click away', T.sectionsOf(setL()).groups[0] === g);
+});
+
+/* the D group -- unreachable under the old cycling -- included */
+T.setExitGroup(setL(), 0, 3);
+T.setExitGroup(setL(), 1, 3);
+T.setExitGroup(setL(), 2, 3);
+T.setExitGroup(setL(), 3, 3);
+ok('all four doorways can sit in the last group', groupsOf() === '3,3,3,3');
+ok('which is still one group', T.sectionsOf(setL()).count === 1);
+
+/* out of range is refused rather than wrapped */
+T.setExitGroup(setL(), 0, T.GROUP_COUNT);
+ok('a group past the last is refused', groupsOf() === '3,3,3,3');
+T.setExitGroup(setL(), 0, -1);
+ok('and so is a negative one', groupsOf() === '3,3,3,3');
+
+/* routing still enumerates sparse ids correctly, on a corner of the grid
+   the other tests do not touch */
+const sparseT = T.createTemplate('sparse');
+sparseT.exitGroups = [3, 3, 3, 3];
+const plainNb = T.createTemplate('plain nb');
+T.state.templates.push(sparseT, plainNb);
+T.state.map.placements[T.placementKey(50, 50)] = { templateId: sparseT.id, rot: 0, mir: false };
+T.state.map.placements[T.placementKey(51, 50)] = { templateId: plainNb.id, rot: 0, mir: false };
+T.state.map.openEdges.add(T.edgeKey(50, 50, 'V'));
+ok('a room whose only group is D still routes',
+   (T.findRoute('50,50', '51,50') || {}).cells?.join('|') === '50,50|51,50');
+ok('and back the other way',
+   (T.findRoute('51,50', '50,50') || {}).cells?.join('|') === '51,50|50,50');
+delete T.state.map.placements[T.placementKey(50, 50)];
+delete T.state.map.placements[T.placementKey(51, 50)];
+T.state.map.openEdges.delete(T.edgeKey(50, 50, 'V'));
+
 /* a grouping that no longer matches the doorways is ignored, not obeyed */
 over().exitGroups = [0, 1];
 ok('a stale override falls back to the derivation',

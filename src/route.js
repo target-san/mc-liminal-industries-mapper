@@ -125,7 +125,7 @@ function findRoute(fromKey, toKey) {
   if (!info) return null;
 
   const startIds = new Set();
-  for (let g = 0; g < info.count; g++) startIds.add(nodeId(fromKey, g));
+  info.ids.forEach(function (g) { startIds.add(nodeId(fromKey, g)); });
 
   const prev = new Map();
   const seen = new Set(startIds);
@@ -193,7 +193,7 @@ function sectionCentreTile(key, group) {
   const fallback = { r: ROOM_MAX / 2, c: ROOM_MAX / 2 };
 
   const info = p ? placementSections(p) : null;
-  const centre = (info && info.centres[group]) || fallback;
+  const centre = (info && info.centres.get(group)) || fallback;
   /* The transform is plain arithmetic, so it carries a fractional centroid
      through as happily as a tile index. */
   const local = fromTemplate(centre.r, centre.c, p.rot, p.mir);

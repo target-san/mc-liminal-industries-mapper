@@ -441,7 +441,7 @@ ok('undo restores the room and its bookmark',
   const box = T.__document.getElementById('exit-groups');
   const labels = () => box.children
     .filter((c) => c.className === 'exit-row')
-    .map((row) => row.children[0].textContent.split('  ')[0]);
+    .map((row) => row.children[0].textContent.split(' ')[0]);
 
   const exitT = T.createTemplate('exits');
   T.state.templates.push(exitT);
